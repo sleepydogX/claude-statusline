@@ -169,6 +169,24 @@ process.stdin.on('end', () => {
       } catch (e) { /* silent */ }
     }
 
+    // ── MCP health ──
+    let mcpHealthPart = '';
+    if (MODULES.mcp_health) {
+      try {
+        const servers = Array.isArray(data.mcp_servers) ? data.mcp_servers : [];
+        const unhealthy = servers.filter(s => s && s.status && s.status !== 'connected');
+        if (unhealthy.length > 0) {
+          let inner;
+          if (unhealthy.length <= 2) {
+            inner = unhealthy.map(s => s.name).join(', ') + ' down';
+          } else {
+            inner = `${unhealthy.length} MCPs down`;
+          }
+          mcpHealthPart = `\x1b[31m\u{1F50C} ${inner}\x1b[0m`;
+        }
+      } catch (e) { /* silent */ }
+    }
+
     // ── Current task from todos ──
     let task = '';
     const homeDir = os.homedir();
@@ -437,8 +455,8 @@ process.stdin.on('end', () => {
       ctxPart
     ].filter(Boolean);
 
-    // ROW 2: Effort + Output Style + Permission Mode + Fast Mode + Session + Cost + Duration + Rate Limits
-    const row2Cells = [effortPart, outputStylePart, permissionModePart, fastModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+    // ROW 2: Effort + Output Style + Permission Mode + Fast Mode + MCP Health + Session + Cost + Duration + Rate Limits
+    const row2Cells = [effortPart, outputStylePart, permissionModePart, fastModePart, mcpHealthPart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
 
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, supabasePart].filter(Boolean);

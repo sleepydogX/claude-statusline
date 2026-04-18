@@ -79,6 +79,18 @@ run_test "12-fast-mode-on" "$FIXTURES/minimal.json" "$FIXTURES/settings-fastmode
 # Test 13: fastMode absent is hidden
 run_test "13-fast-mode-off-hidden" "$FIXTURES/minimal.json" "" "" "FAST" "absent"
 
+# Test 14: 1 failed MCP shows name
+run_test "14-mcp-one-failed-name" "$FIXTURES/mcp-one-failed.json" "" "" "supabase down" "present"
+
+# Test 15: 2 failed MCPs show both names
+run_test "15-mcp-two-failed-names" "$FIXTURES/mcp-two-failed.json" "" "" "supabase, github down" "present"
+
+# Test 16: 3+ failed MCPs show count
+run_test "16-mcp-three-failed-count" "$FIXTURES/mcp-three-failed.json" "" "" "3 MCPs down" "present"
+
+# Test 17: all healthy hides segment
+run_test "17-mcp-healthy-hidden" "$FIXTURES/minimal.json" "" "" "MCP.*down|🔌" "absent"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
