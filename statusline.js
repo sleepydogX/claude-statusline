@@ -140,6 +140,25 @@ process.stdin.on('end', () => {
       } catch (e) { /* silent */ }
     }
 
+    // ── Permission mode ──
+    let permissionModePart = '';
+    if (MODULES.permission_mode) {
+      try {
+        const mode = data.permissionMode;
+        if (mode && mode !== 'default') {
+          const specs = {
+            plan:              { label: 'PLAN',      color: '\x1b[34m',   icon: '\u{1F4CB}' },
+            acceptEdits:       { label: 'AUTO-EDIT', color: '\x1b[33m',   icon: '\u270F' },
+            bypassPermissions: { label: 'BYPASS',    color: '\x1b[5;31m', icon: '\u26A0' },
+          };
+          const spec = specs[mode];
+          if (spec) {
+            permissionModePart = `${spec.color}${spec.icon} ${spec.label}\x1b[0m`;
+          }
+        }
+      } catch (e) { /* silent */ }
+    }
+
     // ── Current task from todos ──
     let task = '';
     const homeDir = os.homedir();
@@ -408,8 +427,8 @@ process.stdin.on('end', () => {
       ctxPart
     ].filter(Boolean);
 
-    // ROW 2: Effort + Output Style + Session + Cost + Duration + Rate Limits
-    const row2Cells = [effortPart, outputStylePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+    // ROW 2: Effort + Output Style + Permission Mode + Session + Cost + Duration + Rate Limits
+    const row2Cells = [effortPart, outputStylePart, permissionModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
 
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, supabasePart].filter(Boolean);

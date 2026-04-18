@@ -64,6 +64,15 @@ run_test "7-output-style-default-hidden" "$FIXTURES/minimal.json" "" "" "explana
 # Test 8: output_style non-default renders in cyan
 run_test "8-output-style-explanatory-shown" "$FIXTURES/output-style-explanatory.json" "" "" $'\x1b\\[36m.*explanatory' "present"
 
+# Test 9: permission plan mode renders "PLAN" with blue
+run_test "9-permission-plan" "$FIXTURES/permission-plan.json" "" "" $'\x1b\\[34m.*PLAN' "present"
+
+# Test 10: permission bypass renders "BYPASS" with blinking red
+run_test "10-permission-bypass" "$FIXTURES/permission-bypass.json" "" "" $'\x1b\\[5;31m.*BYPASS' "present"
+
+# Test 11: permission default is hidden
+run_test "11-permission-default-hidden" "$FIXTURES/minimal.json" "" "" "PLAN|BYPASS|AUTO-EDIT" "absent"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
