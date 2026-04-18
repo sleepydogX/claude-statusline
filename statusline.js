@@ -124,11 +124,7 @@ process.stdin.on('end', () => {
           const color = colorMap[display] || '\x1b[0m';
           const label = display === 'auto' ? 'auto' : display.toUpperCase();
           const marker = isOverride ? '*' : '';
-          if (display === 'auto') {
-            effortPart = `${color}\u{1F9E0} ${label}${marker}\x1b[0m`;
-          } else {
-            effortPart = `\u{1F9E0} ${color}${label}${marker}\x1b[0m`;
-          }
+          effortPart = `${color}\u{1F9E0} ${label}${marker}\x1b[0m`;
         }
       } catch (e) { /* silent */ }
     }

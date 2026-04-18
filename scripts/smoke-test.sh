@@ -44,7 +44,7 @@ run_test() {
 run_test "1-minimal-renders" "$FIXTURES/minimal.json" "" "" "Claude Opus" "present"
 
 # Test 2: effort high from settings renders "HIGH" with yellow ANSI
-run_test "2-effort-high-from-settings" "$FIXTURES/minimal.json" "$FIXTURES/settings-effort-high.json" "" $'\x1b\\[33mHIGH' "present"
+run_test "2-effort-high-from-settings" "$FIXTURES/minimal.json" "$FIXTURES/settings-effort-high.json" "" $'\x1b\\[33m.*HIGH' "present"
 
 # Test 3: env override with xhigh appends asterisk
 run_test "3-effort-env-override-marker" "$FIXTURES/minimal.json" "" "CLAUDE_CODE_EFFORT_LEVEL=xhigh" "XHIGH\\*" "present"
