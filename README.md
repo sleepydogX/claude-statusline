@@ -32,7 +32,7 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 | Segment | Visible when | Shows |
 |---|---|---|
 | 🧠 effort | always | Current reasoning effort (`auto`/`low`/`medium`/`high`/`xhigh`/`max`). Reads `~/.claude/settings.json.effortLevel` and `CLAUDE_CODE_EFFORT_LEVEL` env (appends `*` if env overrides). |
-| ✍ output_style | value ≠ `default` | Active output style name (set via `/output-style`). |
+| ✍ output_style | value ≠ `default` | Active output style name, prefixed with `style:` (e.g. `style: explanatory`, set via `/output-style`). |
 | 📋 permission_mode | value ≠ `default` | `PLAN`, `AUTO-EDIT`, or `BYPASS` (toggle with Shift+Tab). |
 | ⚡ fast_mode | `true` | Claude Code fast mode is on (toggled by `/fast`). |
 | 🔌 mcp_health | any server not `connected` | Which MCP servers are down (name for ≤2 failed, count for ≥3). |

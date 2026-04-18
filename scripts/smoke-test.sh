@@ -62,7 +62,7 @@ run_test "6-effort-auto-default" "$FIXTURES/minimal.json" "" "" "🧠 auto" "pre
 run_test "7-output-style-default-hidden" "$FIXTURES/minimal.json" "" "" "explanatory" "absent"
 
 # Test 8: output_style non-default renders in cyan
-run_test "8-output-style-explanatory-shown" "$FIXTURES/output-style-explanatory.json" "" "" $'\x1b\\[36m.*explanatory' "present"
+run_test "8-output-style-explanatory-shown" "$FIXTURES/output-style-explanatory.json" "" "" $'\x1b\\[36m.*style: explanatory' "present"
 
 # Test 9: permission plan mode renders "PLAN" with blue
 run_test "9-permission-plan" "$FIXTURES/permission-plan.json" "" "" $'\x1b\\[34m.*PLAN' "present"
@@ -123,7 +123,7 @@ run_test "26-effort-env-invalid-placeholder" "$FIXTURES/minimal.json" "" "CLAUDE
 run_test "27-effort-nonstring-falls-to-auto" "$FIXTURES/minimal.json" "$FIXTURES/settings-effortLevel-nonstring.json" "" "🧠 auto" "present"
 
 # Test 28: output_style as object with .name is rendered using the name
-run_test "28-output-style-object-name" "$FIXTURES/output-style-object.json" "" "" $'\x1b\\[36m.*explanatory' "present"
+run_test "28-output-style-object-name" "$FIXTURES/output-style-object.json" "" "" $'\x1b\\[36m.*style: explanatory' "present"
 
 # Test 29: output_style as malformed object (no .name) is hidden, no [object Object]
 run_test "29-output-style-malformed-hidden" "$FIXTURES/output-style-malformed.json" "" "" "\\[object Object\\]|explanatory" "absent"

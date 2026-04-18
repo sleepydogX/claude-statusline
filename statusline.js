@@ -141,7 +141,7 @@ process.stdin.on('end', () => {
           name = raw.name;
         }
         if (name && name !== 'default') {
-          outputStylePart = `\x1b[36m\u270D ${name}\x1b[0m`;
+          outputStylePart = `\x1b[36m\u270D style: ${name}\x1b[0m`;
         }
       } catch (e) { /* silent */ }
     }
