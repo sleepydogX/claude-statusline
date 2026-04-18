@@ -91,6 +91,37 @@ run_test "16-mcp-three-failed-count" "$FIXTURES/mcp-three-failed.json" "" "" "3 
 # Test 17: all healthy hides segment
 run_test "17-mcp-healthy-hidden" "$FIXTURES/minimal.json" "" "" "MCP.*down|🔌" "absent"
 
+# Test 18: malformed settings.json does not crash; other segments render
+run_test "18-malformed-settings-survives" "$FIXTURES/minimal.json" "$FIXTURES/settings-malformed.txt" "" "Claude Opus" "present"
+
+# Test 19: malformed settings.json does not show effort HIGH (settings unreadable)
+run_test "19-malformed-settings-no-effort-value" "$FIXTURES/minimal.json" "$FIXTURES/settings-malformed.txt" "" "HIGH" "absent"
+
+# Test 20: mcp_servers field missing does not crash and segment is absent
+run_test "20-mcp-field-missing-renders" "$FIXTURES/mcp-field-missing.json" "" "" "Claude Opus" "present"
+run_test "20b-mcp-field-missing-no-segment" "$FIXTURES/mcp-field-missing.json" "" "" "MCP.*down|🔌" "absent"
+
+# Test 21: MCP entry without name is silently dropped (no "undefined" / empty output)
+run_test "21-mcp-nameless-dropped" "$FIXTURES/mcp-nameless.json" "" "" "🔌 *down|undefined|^🔌 , " "absent"
+
+# Test 22: permission acceptEdits renders AUTO-EDIT with yellow
+run_test "22-permission-acceptedits" "$FIXTURES/permission-acceptedits.json" "" "" $'\x1b\\[33m.*AUTO-EDIT' "present"
+
+# Test 23: fastMode as string "true" is rejected (strict equality)
+run_test "23-fastmode-string-rejected" "$FIXTURES/minimal.json" "$FIXTURES/settings-fastmode-string.json" "" "FAST" "absent"
+
+# Test 24: empty CLAUDE_CODE_EFFORT_LEVEL env is no-op (falls through to settings/auto)
+run_test "24-effort-env-empty-no-override" "$FIXTURES/minimal.json" "$FIXTURES/settings-effort-high.json" "CLAUDE_CODE_EFFORT_LEVEL=" "HIGH\\*" "absent"
+
+# Test 25: CLAUDE_CODE_EFFORT_LEVEL=unset is no-op (falls through)
+run_test "25-effort-env-unset-no-override" "$FIXTURES/minimal.json" "$FIXTURES/settings-effort-high.json" "CLAUDE_CODE_EFFORT_LEVEL=unset" "HIGH\\*" "absent"
+
+# Test 26: invalid env value (junk) renders invalid placeholder
+run_test "26-effort-env-invalid-placeholder" "$FIXTURES/minimal.json" "" "CLAUDE_CODE_EFFORT_LEVEL=junk" "🧠 \\?" "present"
+
+# Test 27: effortLevel as non-string (number) falls through to auto
+run_test "27-effort-nonstring-falls-to-auto" "$FIXTURES/minimal.json" "$FIXTURES/settings-effortLevel-nonstring.json" "" "🧠 auto" "present"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

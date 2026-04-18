@@ -174,7 +174,7 @@ process.stdin.on('end', () => {
     if (MODULES.mcp_health) {
       try {
         const servers = Array.isArray(data.mcp_servers) ? data.mcp_servers : [];
-        const unhealthy = servers.filter(s => s && s.status && s.status !== 'connected');
+        const unhealthy = servers.filter(s => s && s.name && s.status && s.status !== 'connected');
         if (unhealthy.length > 0) {
           let inner;
           if (unhealthy.length <= 2) {
