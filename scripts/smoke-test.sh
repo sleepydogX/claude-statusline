@@ -122,6 +122,12 @@ run_test "26-effort-env-invalid-placeholder" "$FIXTURES/minimal.json" "" "CLAUDE
 # Test 27: effortLevel as non-string (number) falls through to auto
 run_test "27-effort-nonstring-falls-to-auto" "$FIXTURES/minimal.json" "$FIXTURES/settings-effortLevel-nonstring.json" "" "🧠 auto" "present"
 
+# Test 28: output_style as object with .name is rendered using the name
+run_test "28-output-style-object-name" "$FIXTURES/output-style-object.json" "" "" $'\x1b\\[36m.*explanatory' "present"
+
+# Test 29: output_style as malformed object (no .name) is hidden, no [object Object]
+run_test "29-output-style-malformed-hidden" "$FIXTURES/output-style-malformed.json" "" "" "\\[object Object\\]|explanatory" "absent"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

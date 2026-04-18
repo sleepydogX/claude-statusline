@@ -114,7 +114,7 @@ process.stdin.on('end', () => {
           effortPart = `\x1b[2m\u{1F9E0} ?\x1b[0m`;
         } else {
           const colorMap = {
-            auto:   '\x1b[2;3m',
+            auto:   '\x1b[3m',
             low:    '\x1b[38;5;245m',
             medium: '\x1b[32m',
             high:   '\x1b[33m',
@@ -133,9 +133,15 @@ process.stdin.on('end', () => {
     let outputStylePart = '';
     if (MODULES.output_style) {
       try {
-        const style = data.output_style;
-        if (style && style !== 'default') {
-          outputStylePart = `\x1b[36m\u270D ${style}\x1b[0m`;
+        const raw = data.output_style;
+        let name = '';
+        if (typeof raw === 'string') {
+          name = raw;
+        } else if (raw && typeof raw === 'object' && typeof raw.name === 'string') {
+          name = raw.name;
+        }
+        if (name && name !== 'default') {
+          outputStylePart = `\x1b[36m\u270D ${name}\x1b[0m`;
         }
       } catch (e) { /* silent */ }
     }
