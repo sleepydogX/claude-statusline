@@ -17,6 +17,11 @@ const MODULES = {
   github: true,          // GitHub repo, branch, account
   supabase: true,        // Supabase linked project
   context_bridge: true,  // Write context metrics for other hooks
+  effort: true,          // Reasoning effort level
+  output_style: true,    // Active output style (added in T3)
+  permission_mode: true, // Permission mode indicator (added in T4)
+  fast_mode: true,       // Fast mode indicator (added in T5)
+  mcp_health: true,      // MCP server health (added in T6)
 };
 
 // Load user overrides from config file if present
@@ -59,6 +64,73 @@ process.stdin.on('end', () => {
           }));
         } catch (e) {}
       }
+    }
+
+    // ── User settings (effortLevel, fastMode) ──
+    let userSettings = {};
+    try {
+      const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+      if (fs.existsSync(settingsPath)) {
+        userSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      }
+    } catch (e) { /* silent; treat as empty */ }
+
+    // ── Effort ──
+    let effortPart = '';
+    if (MODULES.effort) {
+      try {
+        const validLevels = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+        const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+        const envVal = envRaw ? envRaw.toLowerCase() : '';
+        const envOverrides = envVal && envVal !== 'auto' && envVal !== 'unset';
+        const settingsVal = typeof userSettings.effortLevel === 'string'
+          ? userSettings.effortLevel.toLowerCase()
+          : '';
+
+        let display;
+        let isOverride;
+        let invalid = false;
+
+        if (envOverrides) {
+          if (validLevels.has(envVal)) {
+            display = envVal;
+            isOverride = true;
+          } else {
+            invalid = true;
+          }
+        } else if (settingsVal) {
+          if (validLevels.has(settingsVal)) {
+            display = settingsVal;
+            isOverride = false;
+          } else {
+            invalid = true;
+          }
+        } else {
+          display = 'auto';
+          isOverride = false;
+        }
+
+        if (invalid) {
+          effortPart = `\x1b[2m\u{1F9E0} ?\x1b[0m`;
+        } else {
+          const colorMap = {
+            auto:   '\x1b[2;3m',
+            low:    '\x1b[38;5;245m',
+            medium: '\x1b[32m',
+            high:   '\x1b[33m',
+            xhigh:  '\x1b[38;5;208m',
+            max:    '\x1b[1;35m',
+          };
+          const color = colorMap[display] || '\x1b[0m';
+          const label = display === 'auto' ? 'auto' : display.toUpperCase();
+          const marker = isOverride ? '*' : '';
+          if (display === 'auto') {
+            effortPart = `${color}\u{1F9E0} ${label}${marker}\x1b[0m`;
+          } else {
+            effortPart = `\u{1F9E0} ${color}${label}${marker}\x1b[0m`;
+          }
+        }
+      } catch (e) { /* silent */ }
     }
 
     // ── Current task from todos ──
@@ -329,8 +401,8 @@ process.stdin.on('end', () => {
       ctxPart
     ].filter(Boolean);
 
-    // ROW 2: Session + Cost + Duration + Rate Limits
-    const row2Cells = [sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+    // ROW 2: Effort + Session + Cost + Duration + Rate Limits
+    const row2Cells = [effortPart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
 
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, supabasePart].filter(Boolean);

@@ -43,6 +43,21 @@ run_test() {
 # Test 1: baseline renders without crashing
 run_test "1-minimal-renders" "$FIXTURES/minimal.json" "" "" "Claude Opus" "present"
 
+# Test 2: effort high from settings renders "HIGH" with yellow ANSI
+run_test "2-effort-high-from-settings" "$FIXTURES/minimal.json" "$FIXTURES/settings-effort-high.json" "" $'\x1b\\[33mHIGH' "present"
+
+# Test 3: env override with xhigh appends asterisk
+run_test "3-effort-env-override-marker" "$FIXTURES/minimal.json" "" "CLAUDE_CODE_EFFORT_LEVEL=xhigh" "XHIGH\\*" "present"
+
+# Test 4: env auto does NOT mark as override
+run_test "4-effort-env-auto-no-marker" "$FIXTURES/minimal.json" "$FIXTURES/settings-effort-high.json" "CLAUDE_CODE_EFFORT_LEVEL=auto" "HIGH\\*" "absent"
+
+# Test 5: invalid effort value renders "?" placeholder
+run_test "5-effort-invalid-placeholder" "$FIXTURES/minimal.json" "$FIXTURES/settings-effort-invalid.json" "" "🧠 \\?" "present"
+
+# Test 6: no settings and no env shows "auto" default
+run_test "6-effort-auto-default" "$FIXTURES/minimal.json" "" "" "🧠 auto" "present"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
