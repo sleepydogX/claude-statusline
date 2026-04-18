@@ -27,6 +27,18 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 | **GitHub** | Repository, branch, and active account |
 | **Supabase** | Linked project name |
 
+### Configuration & runtime state (row 2)
+
+| Segment | Visible when | Shows |
+|---|---|---|
+| 🧠 effort | always | Current reasoning effort (`auto`/`low`/`medium`/`high`/`xhigh`/`max`). Reads `~/.claude/settings.json.effortLevel` and `CLAUDE_CODE_EFFORT_LEVEL` env (appends `*` if env overrides). |
+| ✍ output_style | value ≠ `default` | Active output style name, prefixed with `style:` (e.g. `style: explanatory`, set via `/output-style`). |
+| 📋 permission_mode | value ≠ `default` | `PLAN`, `AUTO-EDIT`, or `BYPASS` (toggle with Shift+Tab). |
+| ⚡ fast_mode | `true` | Claude Code fast mode is on (toggled by `/fast`). |
+| 🔌 mcp_health | any server not `connected` | Which MCP servers are down (name for ≤2 failed, count for ≥3). |
+
+All five can be disabled individually in `~/.claude/statusline-config.json`.
+
 ### Context Window Colors
 
 | Color | Usage | Meaning |
@@ -100,6 +112,16 @@ Module toggles are stored in `~/.claude/statusline-config.json`:
 ```
 
 Edit this file directly or re-run `bash install.sh` to reconfigure.
+
+## Updating
+
+Two equivalent ways to update after a `git pull`:
+
+**From the shell:** re-run `bash install.sh`. The installer auto-detects the existing install and enters upgrade mode — no prompts, config preserved, `statusline.js` refreshed.
+
+**From Claude Code:** run `/statusline-update`. The slash command pulls the repo and runs the installer for you.
+
+After updating, restart your Claude Code session to see the new statusline.
 
 ## Uninstall
 

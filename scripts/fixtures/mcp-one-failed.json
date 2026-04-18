@@ -1,0 +1,18 @@
+{
+  "session_id": "test-session-001",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": { "current_dir": "/tmp/test", "project_dir": "/tmp/test" },
+  "version": "2.1.114",
+  "context_window": { "remaining_percentage": 80 },
+  "cost": { "total_cost_usd": 0.42, "total_duration_ms": 750000, "total_lines_added": 10, "total_lines_removed": 5 },
+  "rate_limits": {
+    "five_hour": { "used_percentage": 35, "resets_at": 9999999999 },
+    "seven_day": { "used_percentage": 12 }
+  },
+  "output_style": "default",
+  "permissionMode": "default",
+  "mcp_servers": [
+    { "name": "supabase", "status": "failed" },
+    { "name": "github", "status": "connected" }
+  ]
+}
