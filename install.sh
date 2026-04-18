@@ -120,16 +120,21 @@ echo "  [2] This project only"
 echo "  [3] Skip — I'll wire settings.json myself"
 read -p "  Choose [1]: " scope_choice
 scope_choice="${scope_choice:-1}"
+scope_choice="$(echo -n "$scope_choice" | tr -d '[:space:]')"
 
 SETTINGS_TARGET=""
 case "$scope_choice" in
   1) SETTINGS_TARGET="$CLAUDE_DIR/settings.json" ;;
   2)
      mkdir -p "./.claude"
-     SETTINGS_TARGET="./.claude/settings.json"
+     SETTINGS_TARGET="$(cd ./.claude && pwd)/settings.json"
+     echo -e "${DIM}  Project dir resolved to: $(dirname "$SETTINGS_TARGET")${RESET}"
      ;;
   3) SETTINGS_TARGET="" ;;
-  *) SETTINGS_TARGET="$CLAUDE_DIR/settings.json" ;;
+  *)
+     echo -e "${YELLOW}  Unrecognized choice '$scope_choice' — defaulting to Global.${RESET}"
+     SETTINGS_TARGET="$CLAUDE_DIR/settings.json"
+     ;;
 esac
 
 # Write config
@@ -173,7 +178,7 @@ if [ -n "$SETTINGS_TARGET" ]; then
       console.error("Existing settings.json is malformed; refusing to overwrite. Fix it or choose scope [3].");
       process.exit(1);
     }
-    cfg.statusLine = { type: "command", command: "node \"" + hookPath + "\"" };
+    cfg.statusLine = { type: "command", command: "node " + JSON.stringify(hookPath) };
     fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n");
   ' "$SETTINGS_TARGET" "$HOOKS_DIR/gsd-statusline.js"
   echo -e "${GREEN}  statusLine wired into $SETTINGS_TARGET${RESET}"
