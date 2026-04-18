@@ -42,4 +42,19 @@ for flag in effort output_style permission_mode fast_mode mcp_health; do
   grep -q "\"$flag\"" "$CONFIG" || { echo "FAIL: $flag missing from config"; exit 1; }
 done
 
+# Snapshot state
+BEFORE_SETTINGS=$(cat "$SETTINGS")
+BEFORE_CONFIG=$(cat "$CONFIG")
+
+# Re-run installer (upgrade mode should be detected; no prompts should change state)
+HOME="$SANDBOX" bash "$REPO_DIR/install.sh" <<< "y
+" >/dev/null
+
+AFTER_SETTINGS=$(cat "$SETTINGS")
+AFTER_CONFIG=$(cat "$CONFIG")
+
+[ "$BEFORE_SETTINGS" = "$AFTER_SETTINGS" ] || { echo "FAIL: settings.json changed on re-run"; exit 1; }
+[ "$BEFORE_CONFIG" = "$AFTER_CONFIG" ] || { echo "FAIL: config changed on re-run"; exit 1; }
+
+echo "PASS: idempotent upgrade"
 echo "PASS: installer writes settings.json and all new module flags"
