@@ -58,6 +58,12 @@ run_test "5-effort-invalid-placeholder" "$FIXTURES/minimal.json" "$FIXTURES/sett
 # Test 6: no settings and no env shows "auto" default
 run_test "6-effort-auto-default" "$FIXTURES/minimal.json" "" "" "🧠 auto" "present"
 
+# Test 7: output_style default is hidden
+run_test "7-output-style-default-hidden" "$FIXTURES/minimal.json" "" "" "explanatory" "absent"
+
+# Test 8: output_style non-default renders in cyan
+run_test "8-output-style-explanatory-shown" "$FIXTURES/output-style-explanatory.json" "" "" $'\x1b\\[36m.*explanatory' "present"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

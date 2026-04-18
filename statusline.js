@@ -129,6 +129,17 @@ process.stdin.on('end', () => {
       } catch (e) { /* silent */ }
     }
 
+    // ── Output style ──
+    let outputStylePart = '';
+    if (MODULES.output_style) {
+      try {
+        const style = data.output_style;
+        if (style && style !== 'default') {
+          outputStylePart = `\x1b[36m\u270D ${style}\x1b[0m`;
+        }
+      } catch (e) { /* silent */ }
+    }
+
     // ── Current task from todos ──
     let task = '';
     const homeDir = os.homedir();
@@ -397,8 +408,8 @@ process.stdin.on('end', () => {
       ctxPart
     ].filter(Boolean);
 
-    // ROW 2: Effort + Session + Cost + Duration + Rate Limits
-    const row2Cells = [effortPart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+    // ROW 2: Effort + Output Style + Session + Cost + Duration + Rate Limits
+    const row2Cells = [effortPart, outputStylePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
 
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, supabasePart].filter(Boolean);
