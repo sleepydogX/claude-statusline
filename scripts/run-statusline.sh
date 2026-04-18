@@ -7,10 +7,10 @@ SETTINGS="$2"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 SANDBOX="$(mktemp -d)"
+trap 'rm -rf "$SANDBOX"' EXIT
 mkdir -p "$SANDBOX/.claude"
 if [ -n "$SETTINGS" ] && [ -f "$SETTINGS" ]; then
   cp "$SETTINGS" "$SANDBOX/.claude/settings.json"
 fi
 
 HOME="$SANDBOX" node "$REPO_DIR/statusline.js" < "$FIXTURE"
-rm -rf "$SANDBOX"
