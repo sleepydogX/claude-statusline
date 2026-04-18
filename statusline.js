@@ -159,6 +159,16 @@ process.stdin.on('end', () => {
       } catch (e) { /* silent */ }
     }
 
+    // ── Fast mode ──
+    let fastModePart = '';
+    if (MODULES.fast_mode) {
+      try {
+        if (userSettings.fastMode === true) {
+          fastModePart = `\x1b[1;96m\u26A1 FAST\x1b[0m`;
+        }
+      } catch (e) { /* silent */ }
+    }
+
     // ── Current task from todos ──
     let task = '';
     const homeDir = os.homedir();
@@ -427,8 +437,8 @@ process.stdin.on('end', () => {
       ctxPart
     ].filter(Boolean);
 
-    // ROW 2: Effort + Output Style + Permission Mode + Session + Cost + Duration + Rate Limits
-    const row2Cells = [effortPart, outputStylePart, permissionModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+    // ROW 2: Effort + Output Style + Permission Mode + Fast Mode + Session + Cost + Duration + Rate Limits
+    const row2Cells = [effortPart, outputStylePart, permissionModePart, fastModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
 
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, supabasePart].filter(Boolean);

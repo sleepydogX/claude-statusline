@@ -73,6 +73,12 @@ run_test "10-permission-bypass" "$FIXTURES/permission-bypass.json" "" "" $'\x1b\
 # Test 11: permission default is hidden
 run_test "11-permission-default-hidden" "$FIXTURES/minimal.json" "" "" "PLAN|BYPASS|AUTO-EDIT" "absent"
 
+# Test 12: fastMode=true renders "FAST" in bold bright cyan
+run_test "12-fast-mode-on" "$FIXTURES/minimal.json" "$FIXTURES/settings-fastmode.json" "" $'\x1b\\[1;96m.*FAST' "present"
+
+# Test 13: fastMode absent is hidden
+run_test "13-fast-mode-off-hidden" "$FIXTURES/minimal.json" "" "" "FAST" "absent"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
