@@ -194,6 +194,12 @@ echo -e "${DIM}  Installing statusline hook...${RESET}"
 cp "$SCRIPT_DIR/statusline.js" "$HOOKS_DIR/gsd-statusline.js"
 chmod +x "$HOOKS_DIR/gsd-statusline.js"
 
+# Install the /statusline-update slash command
+COMMANDS_DIR="$CLAUDE_DIR/commands"
+mkdir -p "$COMMANDS_DIR"
+sed "s|__REPO_PATH__|$SCRIPT_DIR|g" "$SCRIPT_DIR/commands/statusline-update.md" > "$COMMANDS_DIR/statusline-update.md"
+echo -e "${GREEN}  Slash command installed: /statusline-update${RESET}"
+
 # Wire statusLine into settings.json (unless scope = skip or upgrade mode)
 if [ "$UPGRADE_MODE" = false ] && [ -n "$SETTINGS_TARGET" ]; then
   node -e '

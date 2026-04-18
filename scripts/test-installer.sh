@@ -56,5 +56,12 @@ AFTER_CONFIG=$(cat "$CONFIG")
 [ "$BEFORE_SETTINGS" = "$AFTER_SETTINGS" ] || { echo "FAIL: settings.json changed on re-run"; exit 1; }
 [ "$BEFORE_CONFIG" = "$AFTER_CONFIG" ] || { echo "FAIL: config changed on re-run"; exit 1; }
 
+# Slash command assertions
+CMD_FILE="$SANDBOX/.claude/commands/statusline-update.md"
+[ -f "$CMD_FILE" ] || { echo "FAIL: slash command not installed"; exit 1; }
+grep -q "$REPO_DIR" "$CMD_FILE" || { echo "FAIL: repo path not substituted in slash command"; exit 1; }
+grep -q '__REPO_PATH__' "$CMD_FILE" && { echo "FAIL: template placeholder still present"; exit 1; }
+
+echo "PASS: slash command installed with correct repo path"
 echo "PASS: idempotent upgrade"
 echo "PASS: installer writes settings.json and all new module flags"
