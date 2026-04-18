@@ -87,6 +87,11 @@ mod_duration=$(ask_module "duration" "Session duration timer" "y" "⏱ ")
 mod_rate_limits=$(ask_module "rate_limits" "Rate limits (5h + 7d usage)" "y" "⚡")
 mod_lines_changed=$(ask_module "lines_changed" "Lines added/removed" "y" "📊")
 mod_context_bridge=$(ask_module "context_bridge" "Context metrics bridge (for other hooks)" "y" "🔗")
+mod_effort=$(ask_module "effort" "Reasoning effort (/effort level)" "y" "🧠")
+mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "✍ ")
+mod_permission_mode=$(ask_module "permission_mode" "Permission mode indicator" "y" "📋")
+mod_fast_mode=$(ask_module "fast_mode" "Fast mode indicator" "y" "⚡")
+mod_mcp_health=$(ask_module "mcp_health" "MCP server health" "y" "🔌")
 
 echo ""
 echo -e "${CYAN}${BOLD}  External integrations (require CLI tools):${RESET}"
@@ -108,6 +113,25 @@ else
   echo -e "  ⚡ Supabase — ${DIM}skipped (supabase CLI not found)${RESET}"
 fi
 
+echo ""
+echo -e "${CYAN}${BOLD}  Where should the statusline be active?${RESET}"
+echo "  [1] Global — every Claude Code session (recommended)"
+echo "  [2] This project only"
+echo "  [3] Skip — I'll wire settings.json myself"
+read -p "  Choose [1]: " scope_choice
+scope_choice="${scope_choice:-1}"
+
+SETTINGS_TARGET=""
+case "$scope_choice" in
+  1) SETTINGS_TARGET="$CLAUDE_DIR/settings.json" ;;
+  2)
+     mkdir -p "./.claude"
+     SETTINGS_TARGET="./.claude/settings.json"
+     ;;
+  3) SETTINGS_TARGET="" ;;
+  *) SETTINGS_TARGET="$CLAUDE_DIR/settings.json" ;;
+esac
+
 # Write config
 echo ""
 echo -e "${DIM}  Writing configuration...${RESET}"
@@ -121,7 +145,12 @@ cat > "$CONFIG_FILE" << EOF
   "lines_changed": $mod_lines_changed,
   "context_bridge": $mod_context_bridge,
   "github": $mod_github,
-  "supabase": $mod_supabase
+  "supabase": $mod_supabase,
+  "effort": $mod_effort,
+  "output_style": $mod_output_style,
+  "permission_mode": $mod_permission_mode,
+  "fast_mode": $mod_fast_mode,
+  "mcp_health": $mod_mcp_health
 }
 EOF
 
@@ -131,6 +160,27 @@ echo -e "${GREEN}  Config saved to $CONFIG_FILE${RESET}"
 echo -e "${DIM}  Installing statusline hook...${RESET}"
 cp "$SCRIPT_DIR/statusline.js" "$HOOKS_DIR/gsd-statusline.js"
 chmod +x "$HOOKS_DIR/gsd-statusline.js"
+
+# Wire statusLine into settings.json (unless scope = skip)
+if [ -n "$SETTINGS_TARGET" ]; then
+  node -e '
+    const fs = require("fs");
+    const [target, hookPath] = process.argv.slice(1);
+    let cfg = {};
+    try {
+      if (fs.existsSync(target)) cfg = JSON.parse(fs.readFileSync(target, "utf8"));
+    } catch (e) {
+      console.error("Existing settings.json is malformed; refusing to overwrite. Fix it or choose scope [3].");
+      process.exit(1);
+    }
+    cfg.statusLine = { type: "command", command: "node \"" + hookPath + "\"" };
+    fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n");
+  ' "$SETTINGS_TARGET" "$HOOKS_DIR/gsd-statusline.js"
+  echo -e "${GREEN}  statusLine wired into $SETTINGS_TARGET${RESET}"
+else
+  echo -e "${YELLOW}  Skipped settings.json wiring. Add this block manually:${RESET}"
+  echo '  "statusLine": { "type": "command", "command": "node \"'"$HOOKS_DIR"'/gsd-statusline.js\"" }'
+fi
 
 echo ""
 echo -e "${GREEN}${BOLD}  ✓ Installation complete!${RESET}"
