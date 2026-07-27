@@ -129,6 +129,11 @@ run_test "37-payload-session-name" "$FIXTURES/payload-session-name.json" "" "" "
 run_test "38-session-name-truncated" "$FIXTURES/payload-session-name-long.json" "" "" "…" "present"
 run_test "38b-session-name-not-full-length" "$FIXTURES/payload-session-name-long.json" "" "" "wrecks the row" "absent"
 
+# ── Task 1: OSC 8 helper ──
+
+# Test 39: a valid https PR url is emitted as an OSC 8 hyperlink
+run_test "39-osc8-emitted-for-https" "$FIXTURES/pr-open-approved.json" "" "" $'\x1b\\]8;;https://github.com/JawaSec/secops-portal/pull/412' "present"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

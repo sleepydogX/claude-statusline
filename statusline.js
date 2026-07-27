@@ -7,6 +7,15 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Wrap text in an OSC 8 hyperlink. Only http(s) URLs free of control characters
+// are linked, so a malformed URL cannot inject escape sequences into the row.
+// Terminals without OSC 8 support ignore the sequence and show the text.
+function osc8(url, text) {
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return text;
+  if (/[\x00-\x1f\x7f]/.test(url)) return text;
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
+
 // ── Module toggles (set by install script) ──
 const MODULES = {
   session_name: true,    // Session slug display
@@ -456,8 +465,13 @@ process.stdin.on('end', () => {
     // ROW 2: Effort + Output Style + Fast Mode + Session + Cost + Duration + Rate Limits
     const row2Cells = [effortPart, outputStylePart, fastModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
 
+    // Placeholder wiring, replaced by the full badge in Task 2.
+    const prPart = data.pr && data.pr.url && data.pr.number != null
+      ? osc8(data.pr.url, `#${data.pr.number}`)
+      : '';
+
     // ROW 3: GitHub + Supabase
-    const row3Cells = [githubPart, supabasePart].filter(Boolean);
+    const row3Cells = [githubPart, prPart, supabasePart].filter(Boolean);
 
     // Task row
     const taskRow = task ? `\x1b[1;38;5;220m\u2699 ${task}\x1b[0m` : '';
