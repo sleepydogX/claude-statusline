@@ -7,6 +7,14 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Strip ASCII control characters (and DEL) from a value before it is rendered.
+// Used for every row-3 field sourced from the payload, a cache file, or a
+// subprocess's output (gh/supabase/git) — none of which are trusted to be
+// free of escape sequences.
+function stripControl(s) {
+  return String(s).replace(/[\x00-\x1f\x7f]/g, '');
+}
+
 // Wrap text in an OSC 8 hyperlink. Only http(s) URLs free of control characters
 // are linked. On every exit path, text is coerced to a string and stripped of
 // the same control characters before it is returned, so neither the URL nor
@@ -375,7 +383,7 @@ process.stdin.on('end', () => {
       : '';
     const branchName = readBranch(data.workspace?.current_dir || dir);
     const worktreeName = typeof data.workspace?.git_worktree === 'string'
-      ? data.workspace.git_worktree.replace(/[\x00-\x1f\x7f]/g, '')
+      ? stripControl(data.workspace.git_worktree)
       : '';
 
     if (MODULES.github || MODULES.supabase) {
@@ -454,10 +462,11 @@ process.stdin.on('end', () => {
       if (MODULES.github) {
         // Stripped here rather than relying on osc8: osc8 only sanitizes the
         // linked-text path (payloadRepoUrl present), not the plain-text
-        // fallback, and infoCache.gh_repo comes from an unvalidated regex
-        // over `git remote get-url` output.
-        const repoName = (payloadRepo || infoCache.gh_repo).replace(/[\x00-\x1f\x7f]/g, '');
-        const branch = branchName || infoCache.gh_branch;
+        // fallback, and infoCache.gh_repo/gh_branch/gh_user come from
+        // unvalidated regexes over `git`/`gh` subprocess output.
+        const repoName = stripControl(payloadRepo || infoCache.gh_repo);
+        const branch = stripControl(branchName || infoCache.gh_branch);
+        const ghUser = stripControl(infoCache.gh_user);
         if (repoName) {
           // The link needs host, which the git fallback does not reconstruct;
           // without it the repo renders as plain text.
@@ -465,13 +474,17 @@ process.stdin.on('end', () => {
           const repoStr = `\x1b[1;37m\u{1F419} ${repoLabel}\x1b[0m`;
           const branchStr = branch ? ` \x1b[1;32m\u238B ${branch}\x1b[0m` : '';
           const worktreeStr = worktreeName ? ` \x1b[1;38;5;114m\u{1F333} ${worktreeName}\x1b[0m` : '';
-          const userStr = infoCache.gh_user ? ` \x1b[2m@${infoCache.gh_user}\x1b[0m` : '';
+          const userStr = ghUser ? ` \x1b[2m@${ghUser}\x1b[0m` : '';
           githubPart = `${repoStr}${branchStr}${worktreeStr}${userStr}`;
         }
       }
 
-      if (MODULES.supabase && infoCache.sb_project) {
-        supabasePart = `\x1b[1;38;5;42m\u26A1 ${infoCache.sb_project}\x1b[0m`;
+      if (MODULES.supabase) {
+        // Sourced from an unvalidated regex over `supabase status`/`projects list`.
+        const sbProject = stripControl(infoCache.sb_project);
+        if (sbProject) {
+          supabasePart = `\x1b[1;38;5;42m\u26A1 ${sbProject}\x1b[0m`;
+        }
       }
     }
 

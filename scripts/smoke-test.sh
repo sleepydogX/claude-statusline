@@ -296,6 +296,41 @@ run_test "65-repo-owner-esc-no-host-not-leaked" "$FIXTURES/repo-owner-esc-no-hos
 # leak it into the row. git_worktree never passes through osc8 at all.
 run_test "66-worktree-esc-not-leaked" "$FIXTURES/worktree-esc.json" "" "" $'\x1b\\[31mHACKED' "absent"
 
+# ── Final review fix: cached gh_branch/gh_user/sb_project sanitization ──
+# These fields are populated by regex over `git`/`gh`/`supabase` subprocess
+# output and cached to a file in os.tmpdir(); build a poisoned cache entry
+# directly (bypassing the subprocesses) and confirm none of its escape
+# sequences reach the row. The escape is written as the six-character JSON
+# escape sequence (backslash, u, 0, 0, 1, b) built below via $ESC_ESCAPE, not
+# a raw ESC byte -- a raw byte is invalid JSON and JSON.parse would throw,
+# making the cache silently discarded and the test pass for the wrong reason
+# (same pitfall as the fixtures above).
+#
+# Critical: the child node process does NOT inherit TMPDIR from `env -i`, so
+# it must be passed explicitly here -- otherwise this cache file is written
+# to a directory statusline.js never reads, and the test passes vacuously.
+CACHE_TMPDIR="$(mktemp -d)"
+POISON_SESSION="test-cache-poison-1"
+POISON_TS=$(( $(date +%s) * 1000 ))
+BSLASH=$'\x5c'
+ESC_ESCAPE="${BSLASH}u001b"
+POISON_CACHE_JSON="{\"ts\": $POISON_TS, \"gh_repo\": \"safe/repo\", \"gh_user\": \"u${ESC_ESCAPE}[32mHACKUSER\", \"gh_branch\": \"br${ESC_ESCAPE}[31mHACKBRANCH\", \"sb_project\": \"p${ESC_ESCAPE}[33mHACKSB\"}"
+printf '%s' "$POISON_CACHE_JSON" > "$CACHE_TMPDIR/claude-info-$POISON_SESSION.json"
+
+POISON_FIXTURE="$CACHE_TMPDIR/poison-payload.json"
+printf '{"session_id":"%s","model":{"display_name":"Claude Opus 4.7"},"workspace":{"current_dir":"/tmp/test","project_dir":"/tmp/test"},"version":"2.1.220","output_style":{"name":"default"}}' "$POISON_SESSION" > "$POISON_FIXTURE"
+
+out67="$(env -i HOME=/tmp PATH="$PATH" TMPDIR="$CACHE_TMPDIR" bash "$RUNNER" "$POISON_FIXTURE" "" 2>/dev/null || true)"
+
+# Test 67: raw ESC bytes from a poisoned gh_branch/gh_user/sb_project cache
+# entry must not leak into the rendered row.
+if echo "$out67" | grep -qE $'\x1b\\[3[123]mHACK'; then
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("67-cached-fields-not-leaked"); echo "  FAIL: 67-cached-fields-not-leaked"
+else
+  PASS=$((PASS+1)); echo "  PASS: 67-cached-fields-not-leaked"
+fi
+rm -rf "$CACHE_TMPDIR"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
