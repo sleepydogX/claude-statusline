@@ -1,0 +1,10 @@
+{
+  "session_id": "test-session-001",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": { "current_dir": "/tmp/test", "project_dir": "/tmp/test" },
+  "version": "2.1.220",
+  "context_window": { "remaining_percentage": 80 },
+  "cost": { "total_cost_usd": 0.42, "total_duration_ms": 750000 },
+  "effort": { "level": "max" },
+  "output_style": { "name": "default" }
+}

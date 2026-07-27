@@ -1,0 +1,11 @@
+{
+  "session_id": "test-session-002",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": {
+    "current_dir": "/tmp/test",
+    "project_dir": "/tmp/test",
+    "repo": { "host": "github.com", "owner": {}, "name": "n" }
+  },
+  "version": "2.1.220",
+  "output_style": { "name": "default" }
+}

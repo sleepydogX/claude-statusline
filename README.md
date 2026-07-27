@@ -3,13 +3,13 @@
 A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that displays session metrics, project context, and service integrations at a glance.
 
 ```
-────────────────────────────────────────────────────────────────────────────
- ⬡ Opus 4.6 (1M context) v2.1.98 │ 📂 ~/projects/my-app │ +90 -17 │ ██░░░░░░░░ CTX 7%
-────────────────────────────────────────────────────────────────────────────
- 🏷 Tender Discovering Forest │ 💰 $1.84 │ ⏱ 23m15s │ ⚡5h 16% 3h42m │ 📅7d 17%
-────────────────────────────────────────────────────────────────────────────
- 🐙 user/repo ⎇ main @user │ ⚡ my-supabase-project
-────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ⬡ Opus 4.6 (1M context) v2.1.98 │ 📂 ~/projects/my-app │ +90 -17 │ ░░░░░░░░░░ CTX 8%
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 🧠 HIGH │ ✍ style: explanatory │ ⚡ FAST │ 🏷 Tender Discovering Forest │ 💰 $1.84 │ ⏱ 23m15s │ ⚡5h 16% 3h40m │ 📅7d 17%
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 🐙 JawaSec/secops-portal ⎋ dev/kenneth 🌳 fix-auth @jawkgonzalez │ 🔀 #412 ✓
+────────────────────────────────────────────────────────────────────────────────────────────────────
 ```
 
 ## Features
@@ -31,13 +31,50 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 
 | Segment | Visible when | Shows |
 |---|---|---|
-| 🧠 effort | always | Current reasoning effort (`auto`/`low`/`medium`/`high`/`xhigh`/`max`). Reads `~/.claude/settings.json.effortLevel` and `CLAUDE_CODE_EFFORT_LEVEL` env (appends `*` if env overrides). |
+| 🧠 effort | always | Current reasoning effort (`auto`/`low`/`medium`/`high`/`xhigh`/`max`), read from the payload's `effort.level` so it tracks mid-session `/effort` changes. Falls back to `~/.claude/settings.json.effortLevel` and `CLAUDE_CODE_EFFORT_LEVEL` (appends `*`) when the payload omits the field. |
 | ✍ output_style | value ≠ `default` | Active output style name, prefixed with `style:` (e.g. `style: explanatory`, set via `/output-style`). |
-| 📋 permission_mode | value ≠ `default` | `PLAN`, `AUTO-EDIT`, or `BYPASS` (toggle with Shift+Tab). |
-| ⚡ fast_mode | `true` | Claude Code fast mode is on (toggled by `/fast`). |
-| 🔌 mcp_health | any server not `connected` | Which MCP servers are down (name for ≤2 failed, count for ≥3). |
+| ⚡ fast_mode | `true` | Claude Code fast mode is on, read from the payload's `fast_mode` (toggled by `/fast`). |
 
-All five can be disabled individually in `~/.claude/statusline-config.json`.
+All three can be disabled individually in `~/.claude/statusline-config.json`.
+
+The 🏷 session name comes from the payload's `session_name` — a `/rename` or `--name` value, otherwise the AI-generated title — and falls back to the transcript slug when neither exists.
+
+> **Removed in the payload-field cleanup:** the `permission_mode` and `mcp_health` segments read `permissionMode` and `mcp_servers`, which Claude Code does not send to status line commands, so they never rendered. Claude Code already shows the permission mode in its own footer and surfaces MCP errors beside the status line. Upgrading drops both toggles from your config automatically.
+
+### Row 3 — repository context
+
+```
+🐙 JawaSec/secops-portal ⎋ dev/kenneth 🌳 fix-auth @jawkgonzalez │ 🔀 #412 ✓ │ ⚡ my-project
+```
+
+| Segment | Source | Visible when |
+|---|---|---|
+| 🐙 repo | `workspace.repo` from the payload, falling back to `git remote get-url origin` when the payload omits it | the `github` module is on and a repo name resolves |
+| ⎋ branch | `.git/HEAD`, read directly — no `git` subprocess in the common case | rendered together with repo, once a repo name resolves |
+| 🌳 worktree | `workspace.git_worktree` from the payload | rendered together with repo, when the current directory is inside a linked git worktree |
+| @user | `gh auth status` (cached 120s) | rendered together with repo, when the GitHub CLI is installed and authenticated |
+| 🔀 PR | `pr` from the payload; the number links to the PR | the `pr` module is on and an open PR exists for the current branch |
+| ⚡ supabase | `supabase status` (cached 120s) | the `supabase` module is on and the project is linked to a Supabase project |
+
+Repo, branch, worktree and account render as a single group: they only appear
+when the `github` module is enabled *and* a repo name resolves. Inside a git
+directory with `github` disabled, or with no resolvable repo name (no
+`workspace.repo` and no `origin` remote), none of the four show — even if the
+directory has a branch or an active worktree.
+
+The PR badge marks the review state: ✓ approved, ✗ changes requested,
+● pending, ○ draft. A PR with no review state shows the number alone. The
+`pr` module is independent of `github` — it renders whenever the payload's
+`pr` object has a numeric `number` field, whether or not the repo/branch
+group is visible. A `pr` object without a numeric `number` renders nothing.
+
+Repo, branch and worktree come from the status line payload or a direct
+`.git/HEAD` read, so in the common case they cost no subprocess and refresh
+on every update. Only the GitHub account and Supabase project still shell
+out, behind a 120-second cache.
+
+Links use OSC 8 escape sequences, clickable in iTerm2, Kitty and WezTerm. Other
+terminals show the text and ignore the sequence.
 
 ### Context Window Colors
 
@@ -87,6 +124,10 @@ The interactive installer will guide you through module selection:
   ⚡ Rate limits (5h + 7d usage) (Y/n):
   📊 Lines added/removed (Y/n):
   🔗 Context metrics bridge (for other hooks) (Y/n):
+  🧠 Reasoning effort (/effort level) (Y/n):
+  ✍  Output style (/output-style) (Y/n):
+  ⚡ Fast mode indicator (Y/n):
+  🔀 Open pull request badge (Y/n):
 
   External integrations (require CLI tools):
 
@@ -107,7 +148,11 @@ Module toggles are stored in `~/.claude/statusline-config.json`:
   "lines_changed": true,
   "context_bridge": true,
   "github": true,
-  "supabase": false
+  "supabase": false,
+  "effort": true,
+  "output_style": true,
+  "fast_mode": true,
+  "pr": true
 }
 ```
 

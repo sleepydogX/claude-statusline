@@ -1,0 +1,11 @@
+{
+  "session_id": "test-session-001",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": { "current_dir": "/tmp/test", "project_dir": "/tmp/test" },
+  "version": "2.1.220",
+  "output_style": { "name": "default" },
+  "pr": {
+    "number": 412,
+    "url": "https://github.com/JawaSec/secops-portal/pull/412"
+  }
+}

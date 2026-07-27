@@ -7,6 +7,72 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Strip ASCII control characters (and DEL) from a value before it is rendered.
+// Used for every row-3 field sourced from the payload, a cache file, or a
+// subprocess's output (gh/supabase/git) — none of which are trusted to be
+// free of escape sequences.
+function stripControl(s) {
+  return String(s).replace(/[\x00-\x1f\x7f]/g, '');
+}
+
+// Wrap text in an OSC 8 hyperlink. Only http(s) URLs free of control characters
+// are linked. On every exit path, text is coerced to a string and stripped of
+// the same control characters before it is returned, so neither the URL nor
+// the visible text can inject escape sequences into the row.
+// Terminals without OSC 8 support ignore the sequence and show the text.
+function osc8(url, text) {
+  const safeText = String(text).replace(/[\x00-\x1f\x7f]/g, '');
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return safeText;
+  if (/[\x00-\x1f\x7f]/.test(url)) return safeText;
+  return `\x1b]8;;${url}\x07${safeText}\x1b]8;;\x07`;
+}
+
+// Resolve the git directory for startDir, walking up at most MAX_GIT_WALKUP
+// levels. A .git FILE rather than a directory means a worktree or submodule; it
+// holds a "gitdir: <path>" pointer, which may be relative to the file's own
+// directory. Returns '' when nothing is found.
+const MAX_GIT_WALKUP = 10;
+function resolveGitDir(startDir) {
+  let dir = startDir;
+  for (let i = 0; i < MAX_GIT_WALKUP; i++) {
+    const candidate = path.join(dir, '.git');
+    try {
+      const stat = fs.statSync(candidate);
+      if (stat.isDirectory()) return candidate;
+      if (stat.isFile()) {
+        const pointer = fs.readFileSync(candidate, 'utf8').match(/gitdir:\s*(.+)/);
+        if (!pointer) return '';
+        const target = pointer[1].trim();
+        return path.isAbsolute(target) ? target : path.resolve(dir, target);
+      }
+    } catch (e) { /* not here; keep walking */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;  // filesystem root
+    dir = parent;
+  }
+  return '';
+}
+
+// Read the current branch from HEAD. A "ref: refs/heads/NAME" line yields NAME;
+// anything else is a detached HEAD, reported as a 7-character short SHA.
+function readBranch(startDir) {
+  try {
+    const gitDir = resolveGitDir(startDir);
+    if (!gitDir) return '';
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    const ref = head.match(/^ref:\s*refs\/heads\/(.+)$/);
+    if (ref) {
+      const name = ref[1].trim();
+      const safe = name.replace(/[\x00-\x1f\x7f]/g, '');
+      return safe === name ? safe : '';
+    }
+    if (/^[0-9a-f]{7,40}$/i.test(head)) return head.slice(0, 7);
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
 // ── Module toggles (set by install script) ──
 const MODULES = {
   session_name: true,    // Session slug display
@@ -19,9 +85,8 @@ const MODULES = {
   context_bridge: true,  // Write context metrics for other hooks
   effort: true,          // Reasoning effort level
   output_style: true,    // Active output style (added in T3)
-  permission_mode: true, // Permission mode indicator (added in T4)
   fast_mode: true,       // Fast mode indicator (added in T5)
-  mcp_health: true,      // MCP server health (added in T6)
+  pr: true,              // Open pull request for the current branch
 };
 
 // Load user overrides from config file if present
@@ -76,10 +141,17 @@ process.stdin.on('end', () => {
     } catch (e) { /* silent; treat as empty */ }
 
     // ── Effort ──
+    // Primary source is the payload's effort.level: it is the live session value
+    // and reflects mid-session /effort changes. It is absent when the model does
+    // not support the effort parameter, and on Claude Code builds that predate the
+    // field — in both cases we fall back to the settings.json / env reading below.
     let effortPart = '';
     if (MODULES.effort) {
       try {
         const validLevels = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+        const payloadRaw = typeof data.effort?.level === 'string' ? data.effort.level : '';
+        // Accept unknown-but-sane levels so a newly added level still renders.
+        const payloadVal = payloadRaw.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8);
         const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
         const envVal = envRaw ? envRaw.toLowerCase() : '';
         const envOverrides = envVal && envVal !== 'auto' && envVal !== 'unset';
@@ -91,7 +163,11 @@ process.stdin.on('end', () => {
         let isOverride;
         let invalid = false;
 
-        if (envOverrides) {
+        if (payloadVal) {
+          // The payload already reports the effective level, so no override marker.
+          display = payloadVal;
+          isOverride = false;
+        } else if (envOverrides) {
           if (validLevels.has(envVal)) {
             display = envVal;
             isOverride = true;
@@ -146,49 +222,17 @@ process.stdin.on('end', () => {
       } catch (e) { /* silent */ }
     }
 
-    // ── Permission mode ──
-    let permissionModePart = '';
-    if (MODULES.permission_mode) {
-      try {
-        const mode = data.permissionMode;
-        if (mode && mode !== 'default') {
-          const specs = {
-            plan:              { label: 'PLAN',      color: '\x1b[34m',   icon: '\u{1F4CB}' },
-            acceptEdits:       { label: 'AUTO-EDIT', color: '\x1b[33m',   icon: '\u270F' },
-            bypassPermissions: { label: 'BYPASS',    color: '\x1b[5;31m', icon: '\u26A0' },
-          };
-          const spec = specs[mode];
-          if (spec) {
-            permissionModePart = `${spec.color}${spec.icon} ${spec.label}\x1b[0m`;
-          }
-        }
-      } catch (e) { /* silent */ }
-    }
-
     // ── Fast mode ──
     let fastModePart = '';
     if (MODULES.fast_mode) {
       try {
-        if (userSettings.fastMode === true) {
+        // fast_mode is the live session flag toggled by /fast. settings.json only
+        // holds the startup default, so it is a fallback for builds omitting it.
+        const enabled = typeof data.fast_mode === 'boolean'
+          ? data.fast_mode
+          : userSettings.fastMode === true;
+        if (enabled) {
           fastModePart = `\x1b[1;96m\u26A1 FAST\x1b[0m`;
-        }
-      } catch (e) { /* silent */ }
-    }
-
-    // ── MCP health ──
-    let mcpHealthPart = '';
-    if (MODULES.mcp_health) {
-      try {
-        const servers = Array.isArray(data.mcp_servers) ? data.mcp_servers : [];
-        const unhealthy = servers.filter(s => s && s.name && s.status && s.status !== 'connected');
-        if (unhealthy.length > 0) {
-          let inner;
-          if (unhealthy.length <= 2) {
-            inner = unhealthy.map(s => s.name).join(', ') + ' down';
-          } else {
-            inner = `${unhealthy.length} MCPs down`;
-          }
-          mcpHealthPart = `\x1b[31m\u{1F50C} ${inner}\x1b[0m`;
         }
       } catch (e) { /* silent */ }
     }
@@ -214,9 +258,24 @@ process.stdin.on('end', () => {
       } catch (e) {}
     }
 
-    // ── Session name (slug from transcript) ──
+    // ── Session name ──
+    // Prefer the native session_name field (a /rename or --name value, otherwise
+    // the AI-generated title). It is absent when the session has neither, so keep
+    // scraping the transcript slug as a fallback.
     let sessionNamePart = '';
-    if (MODULES.session_name) {
+    const MAX_SESSION_NAME = 40;
+    const renderSessionName = (text) => {
+      const clean = text.replace(/\s+/g, ' ').trim();
+      if (!clean) return '';
+      const shown = clean.length > MAX_SESSION_NAME
+        ? clean.slice(0, MAX_SESSION_NAME - 1) + '…'
+        : clean;
+      return `\x1b[1;38;5;213m\u{1F3F7} ${shown}\x1b[0m`;
+    };
+    if (MODULES.session_name && typeof data.session_name === 'string') {
+      sessionNamePart = renderSessionName(data.session_name);
+    }
+    if (MODULES.session_name && !sessionNamePart) {
       const transcriptPath = data.transcript_path;
       if (transcriptPath && fs.existsSync(transcriptPath)) {
         try {
@@ -244,7 +303,7 @@ process.stdin.on('end', () => {
           }
           if (slug) {
             const formatted = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-            sessionNamePart = `\x1b[1;38;5;213m\u{1F3F7} ${formatted}\x1b[0m`;
+            sessionNamePart = renderSessionName(formatted);
           }
         } catch (e) {}
       }
@@ -308,10 +367,24 @@ process.stdin.on('end', () => {
       }
     }
 
-    // ── GitHub & Supabase info (cached) ──
+    // ── Row 3: git context (payload-sourced, uncached) ──
+    // repo, worktree and branch cost nothing to obtain, so they are read fresh on
+    // every invocation. Only gh/supabase go through the cache below.
     const { execFileSync } = require('child_process');
     let githubPart = '';
     let supabasePart = '';
+
+    const repoInfo = data.workspace?.repo;
+    const payloadRepo = repoInfo && typeof repoInfo.owner === 'string' && repoInfo.owner && typeof repoInfo.name === 'string' && repoInfo.name
+      ? `${repoInfo.owner}/${repoInfo.name}`
+      : '';
+    const payloadRepoUrl = payloadRepo && typeof repoInfo.host === 'string' && repoInfo.host
+      ? `https://${repoInfo.host}/${repoInfo.owner}/${repoInfo.name}`
+      : '';
+    const branchName = readBranch(data.workspace?.current_dir || dir);
+    const worktreeName = typeof data.workspace?.git_worktree === 'string'
+      ? stripControl(data.workspace.git_worktree)
+      : '';
 
     if (MODULES.github || MODULES.supabase) {
       const sessionSafeForCache = session && !/[/\\]|\.\./.test(session);
@@ -331,15 +404,21 @@ process.stdin.on('end', () => {
         const cwd = data.workspace?.project_dir || dir;
 
         if (MODULES.github) {
-          try {
-            const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000 }).toString().trim();
-            const repoMatch = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
-            if (repoMatch) infoCache.gh_repo = repoMatch[1];
-          } catch (e) {}
-          try {
-            const branch = execFileSync('git', ['branch', '--show-current'], { cwd, timeout: 2000 }).toString().trim();
-            if (branch) infoCache.gh_branch = branch;
-          } catch (e) {}
+          // Fallbacks only: Claude Code builds that predate workspace.repo, or a
+          // repo with no origin remote. Skipped entirely when the payload has it.
+          if (!payloadRepo) {
+            try {
+              const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+              const repoMatch = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
+              if (repoMatch) infoCache.gh_repo = repoMatch[1];
+            } catch (e) {}
+          }
+          if (!branchName) {
+            try {
+              const branch = execFileSync('git', ['branch', '--show-current'], { cwd: data.workspace?.current_dir || dir, timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+              if (branch) infoCache.gh_branch = branch;
+            } catch (e) {}
+          }
           try {
             const ghStatus = execFileSync('gh', ['auth', 'status'], { timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
             const combined = ghStatus.toString();
@@ -380,15 +459,32 @@ process.stdin.on('end', () => {
         }
       }
 
-      if (MODULES.github && infoCache.gh_repo) {
-        const repoPart = `\x1b[1;37m\u{1F419} ${infoCache.gh_repo}\x1b[0m`;
-        const branchStr = infoCache.gh_branch ? ` \x1b[1;32m\u238B ${infoCache.gh_branch}\x1b[0m` : '';
-        const userStr = infoCache.gh_user ? ` \x1b[2m@${infoCache.gh_user}\x1b[0m` : '';
-        githubPart = `${repoPart}${branchStr}${userStr}`;
+      if (MODULES.github) {
+        // Stripped here rather than relying on osc8: osc8 only sanitizes the
+        // linked-text path (payloadRepoUrl present), not the plain-text
+        // fallback, and infoCache.gh_repo/gh_branch/gh_user come from
+        // unvalidated regexes over `git`/`gh` subprocess output.
+        const repoName = stripControl(payloadRepo || infoCache.gh_repo);
+        const branch = stripControl(branchName || infoCache.gh_branch);
+        const ghUser = stripControl(infoCache.gh_user);
+        if (repoName) {
+          // The link needs host, which the git fallback does not reconstruct;
+          // without it the repo renders as plain text.
+          const repoLabel = payloadRepoUrl ? osc8(payloadRepoUrl, repoName) : repoName;
+          const repoStr = `\x1b[1;37m\u{1F419} ${repoLabel}\x1b[0m`;
+          const branchStr = branch ? ` \x1b[1;32m\u238B ${branch}\x1b[0m` : '';
+          const worktreeStr = worktreeName ? ` \x1b[1;38;5;114m\u{1F333} ${worktreeName}\x1b[0m` : '';
+          const userStr = ghUser ? ` \x1b[2m@${ghUser}\x1b[0m` : '';
+          githubPart = `${repoStr}${branchStr}${worktreeStr}${userStr}`;
+        }
       }
 
-      if (MODULES.supabase && infoCache.sb_project) {
-        supabasePart = `\x1b[1;38;5;42m\u26A1 ${infoCache.sb_project}\x1b[0m`;
+      if (MODULES.supabase) {
+        // Sourced from an unvalidated regex over `supabase status`/`projects list`.
+        const sbProject = stripControl(infoCache.sb_project);
+        if (sbProject) {
+          supabasePart = `\x1b[1;38;5;42m\u26A1 ${sbProject}\x1b[0m`;
+        }
       }
     }
 
@@ -461,11 +557,35 @@ process.stdin.on('end', () => {
       ctxPart
     ].filter(Boolean);
 
-    // ROW 2: Effort + Output Style + Permission Mode + Fast Mode + MCP Health + Session + Cost + Duration + Rate Limits
-    const row2Cells = [effortPart, outputStylePart, permissionModePart, fastModePart, mcpHealthPart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+    // ROW 2: Effort + Output Style + Fast Mode + Session + Cost + Duration + Rate Limits
+    const row2Cells = [effortPart, outputStylePart, fastModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+
+    // ── Pull request ──
+    // data.pr is present only while an open PR exists for the branch; it
+    // disappears once the PR merges or closes. review_state may be absent on
+    // its own, so the symbol is optional while the number is not.
+    let prPart = '';
+    if (MODULES.pr) {
+      try {
+        const pr = data.pr;
+        const number = pr && typeof pr.number === 'number' ? pr.number : null;
+        if (number != null) {
+          const states = Object.assign(Object.create(null), {
+            approved:          { symbol: '✓', color: '\x1b[32m' },
+            changes_requested: { symbol: '✗', color: '\x1b[38;5;208m' },
+            pending:           { symbol: '●', color: '\x1b[33m' },
+            draft:             { symbol: '○', color: '\x1b[2m' },
+          });
+          const state = (typeof pr.review_state === 'string' && states[pr.review_state]) || { symbol: '', color: '\x1b[1;37m' };
+          const label = state.symbol ? `#${number} ${state.symbol}` : `#${number}`;
+          const linked = osc8(pr.url, label);
+          prPart = `${state.color}\u{1F500} ${linked}\x1b[0m`;
+        }
+      } catch (e) { /* silent */ }
+    }
 
     // ROW 3: GitHub + Supabase
-    const row3Cells = [githubPart, supabasePart].filter(Boolean);
+    const row3Cells = [githubPart, prPart, supabasePart].filter(Boolean);
 
     // Task row
     const taskRow = task ? `\x1b[1;38;5;220m\u2699 ${task}\x1b[0m` : '';

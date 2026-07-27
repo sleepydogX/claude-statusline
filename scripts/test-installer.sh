@@ -38,8 +38,13 @@ grep -q '"statusLine"' "$SETTINGS" || { echo "FAIL: statusLine block not in sett
 grep -q 'gsd-statusline.js' "$SETTINGS" || { echo "FAIL: hook path not in statusLine.command"; exit 1; }
 
 # New module flags must all be present in config
-for flag in effort output_style permission_mode fast_mode mcp_health; do
+for flag in effort output_style fast_mode pr; do
   grep -q "\"$flag\"" "$CONFIG" || { echo "FAIL: $flag missing from config"; exit 1; }
+done
+
+# Toggles for removed segments must not be written back
+for flag in permission_mode mcp_health; do
+  grep -q "\"$flag\"" "$CONFIG" && { echo "FAIL: removed flag $flag still in config"; exit 1; }
 done
 
 # Snapshot state
@@ -62,6 +67,24 @@ CMD_FILE="$SANDBOX/.claude/commands/statusline-update.md"
 grep -q "$REPO_DIR" "$CMD_FILE" || { echo "FAIL: repo path not substituted in slash command"; exit 1; }
 grep -q '__REPO_PATH__' "$CMD_FILE" && { echo "FAIL: template placeholder still present"; exit 1; }
 
+# Upgrading a pre-cleanup config must drop the stale toggles and keep the rest
+cat > "$CONFIG" <<'OLDCONFIG'
+{
+  "session_name": false,
+  "cost": true,
+  "permission_mode": true,
+  "mcp_health": true
+}
+OLDCONFIG
+HOME="$SANDBOX" bash "$REPO_DIR/install.sh" <<< "y
+" >/dev/null
+
+grep -q '"permission_mode"' "$CONFIG" && { echo "FAIL: permission_mode survived upgrade"; exit 1; }
+grep -q '"mcp_health"' "$CONFIG" && { echo "FAIL: mcp_health survived upgrade"; exit 1; }
+grep -q '"session_name": false' "$CONFIG" || { echo "FAIL: upgrade clobbered an existing user value"; exit 1; }
+grep -q '"fast_mode"' "$CONFIG" || { echo "FAIL: upgrade did not add missing flags"; exit 1; }
+
 echo "PASS: slash command installed with correct repo path"
 echo "PASS: idempotent upgrade"
 echo "PASS: installer writes settings.json and all new module flags"
+echo "PASS: upgrade prunes removed toggles and preserves user values"
