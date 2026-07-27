@@ -16,6 +16,11 @@
 - **ANSI escapes are written as `\x1b[...m` string literals**, matching the existing file. Emoji are written as `\u{...}` escapes, not literal characters — the existing file does this and the Edit tool matches on it.
 - **Silent failure only.** No `console.error`, no writes to stderr. Claude Code captures stdout; anything else pollutes the session.
 - **Fixtures live in `scripts/fixtures/`, tests in `scripts/smoke-test.sh`.** Follow the existing `run_test "name" "$FIXTURES/x.json" "settings" "env" "pattern" "present|absent"` signature.
+- **macOS ships bash 3.2**, which does NOT support `\u`/`\U` escapes in ANSI-C
+  quoting (the `$` + single-quote form) — it emits the literal text, so a pattern
+  written that way silently matches nothing and an "absent" assertion passes
+  vacuously. Write emoji as literal characters in double quotes in test patterns.
+  `\x1b` IS supported and remains the correct way to write ANSI escapes.
 - **Test count must only grow.** `bash scripts/smoke-test.sh` currently reports `31 passed, 0 failed`. Every task ends with it passing.
 
 ## File Structure
@@ -199,7 +204,7 @@ run_test "45-pr-unknown-state-no-symbol" "$FIXTURES/pr-open-unknown-state.json" 
 run_test "45b-pr-unknown-state-still-shows-number" "$FIXTURES/pr-open-unknown-state.json" "" "" "#412" "present"
 
 # Test 46: no pr field hides the segment
-run_test "46-pr-absent-hidden" "$FIXTURES/minimal.json" "" "" $'\U0001F500' "absent"
+run_test "46-pr-absent-hidden" "$FIXTURES/minimal.json" "" "" "🔀" "absent"
 
 # Test 47: a non-http url is not linked, but the number still renders
 run_test "47-pr-bad-url-no-link" "$FIXTURES/pr-bad-url.json" "" "" $'\x1b\\]8;;' "absent"
@@ -324,10 +329,10 @@ run_test "53-repo-from-payload" "$FIXTURES/repo-and-worktree.json" "" "" "JawaSe
 run_test "54-repo-linked" "$FIXTURES/repo-and-worktree.json" "" "" $'\x1b\\]8;;https://github.com/JawaSec/secops-portal' "present"
 
 # Test 55: workspace.git_worktree renders the worktree name
-run_test "55-worktree-shown" "$FIXTURES/repo-and-worktree.json" "" "" $'\U0001F333 fix-auth' "present"
+run_test "55-worktree-shown" "$FIXTURES/repo-and-worktree.json" "" "" "🌳 fix-auth" "present"
 
 # Test 56: no git_worktree hides the worktree piece
-run_test "56-worktree-absent-hidden" "$FIXTURES/minimal.json" "" "" $'\U0001F333' "absent"
+run_test "56-worktree-absent-hidden" "$FIXTURES/minimal.json" "" "" "🌳" "absent"
 
 # Test 57: with workspace.repo present, no git binary is needed at all
 PATH_NO_GIT="$(mktemp -d)"
