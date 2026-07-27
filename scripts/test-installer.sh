@@ -38,7 +38,7 @@ grep -q '"statusLine"' "$SETTINGS" || { echo "FAIL: statusLine block not in sett
 grep -q 'gsd-statusline.js' "$SETTINGS" || { echo "FAIL: hook path not in statusLine.command"; exit 1; }
 
 # New module flags must all be present in config
-for flag in effort output_style fast_mode; do
+for flag in effort output_style fast_mode pr; do
   grep -q "\"$flag\"" "$CONFIG" || { echo "FAIL: $flag missing from config"; exit 1; }
 done
 

@@ -96,6 +96,7 @@ if [ "$UPGRADE_MODE" = false ]; then
   mod_effort=$(ask_module "effort" "Reasoning effort (/effort level)" "y" "🧠")
   mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "✍ ")
   mod_fast_mode=$(ask_module "fast_mode" "Fast mode indicator" "y" "⚡")
+  mod_pr=$(ask_module "pr" "Open pull request badge" "y" "🔀")
 
   echo ""
   echo -e "${CYAN}${BOLD}  External integrations (require CLI tools):${RESET}"
@@ -162,7 +163,8 @@ if [ "$UPGRADE_MODE" = false ]; then
   "supabase": $mod_supabase,
   "effort": $mod_effort,
   "output_style": $mod_output_style,
-  "fast_mode": $mod_fast_mode
+  "fast_mode": $mod_fast_mode,
+  "pr": $mod_pr
 }
 EOF
 else
@@ -173,7 +175,7 @@ else
     const defaults = {
       session_name: true, cost: true, duration: true, rate_limits: true,
       lines_changed: true, context_bridge: true, github: true, supabase: true,
-      effort: true, output_style: true, fast_mode: true,
+      effort: true, output_style: true, fast_mode: true, pr: true,
     };
     let cur = {};
     try { cur = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) {}
