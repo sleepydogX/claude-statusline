@@ -479,13 +479,13 @@ process.stdin.on('end', () => {
         const pr = data.pr;
         const number = pr && typeof pr.number === 'number' ? pr.number : null;
         if (number != null) {
-          const states = {
+          const states = Object.assign(Object.create(null), {
             approved:          { symbol: '✓', color: '\x1b[32m' },
             changes_requested: { symbol: '✗', color: '\x1b[38;5;208m' },
             pending:           { symbol: '●', color: '\x1b[33m' },
             draft:             { symbol: '○', color: '\x1b[2m' },
-          };
-          const state = states[pr.review_state] || { symbol: '', color: '\x1b[1;37m' };
+          });
+          const state = (typeof pr.review_state === 'string' && states[pr.review_state]) || { symbol: '', color: '\x1b[1;37m' };
           const label = state.symbol ? `#${number} ${state.symbol}` : `#${number}`;
           const linked = osc8(pr.url, label);
           prPart = `${state.color}\u{1F500} ${linked}\x1b[0m`;

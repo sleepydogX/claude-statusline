@@ -163,6 +163,10 @@ run_test "46-pr-absent-hidden" "$FIXTURES/minimal.json" "" "" "🔀" "absent"
 run_test "47-pr-bad-url-no-link" "$FIXTURES/pr-bad-url.json" "" "" $'\x1b\\]8;;' "absent"
 run_test "47b-pr-bad-url-number-shown" "$FIXTURES/pr-bad-url.json" "" "" "#99" "present"
 
+# Test 48: a review_state of "__proto__" must not leak Object.prototype through
+# the states lookup map and print the literal string "undefined"
+run_test "48-pr-proto-state-no-undefined" "$FIXTURES/pr-open-proto-state.json" "" "" "undefined" "absent"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
