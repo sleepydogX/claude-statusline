@@ -230,6 +230,10 @@ mkdir -p "$BRANCHTMP/normal/src/deep"
 # (e) no .git anywhere
 mkdir -p "$BRANCHTMP/bare"
 
+# (f) HEAD ref containing raw control characters (ANSI injection attempt)
+mkdir -p "$BRANCHTMP/malicious/.git"
+printf 'ref: refs/heads/ma\x1b[31mHACKED\x1b[0m\n' > "$BRANCHTMP/malicious/.git/HEAD"
+
 # Emit a payload whose repo comes from the payload (so githubPart renders without
 # git) but whose current_dir points at the directory under test.
 branch_out() {
@@ -262,6 +266,21 @@ branch_case "61-branch-walks-up" "$BRANCHTMP/normal/src/deep" "feature/x"
 
 # Test 62: no .git anywhere renders without a branch and without crashing
 branch_case "62-no-git-still-renders" "$BRANCHTMP/bare" "Claude Opus"
+
+# ── Fix round 1: sanitization findings ──
+
+# Test 63: a non-string workspace.repo.owner must not render as [object Object]
+run_test "63-repo-owner-nonstring-no-object-literal" "$FIXTURES/repo-owner-nonstring.json" "" "" "\\[object Object\\]" "absent"
+
+# Test 64: a HEAD ref carrying raw control characters must not leak them into
+# the rendered row (readBranch must treat a ref that required stripping as
+# untrustworthy and return '', rather than emit a silently altered value).
+out64="$(branch_out "$BRANCHTMP/malicious")"
+if echo "$out64" | grep -qE $'\x1b\\[31mHACKED'; then
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("64-branch-control-chars-not-leaked"); echo "  FAIL: 64-branch-control-chars-not-leaked"
+else
+  PASS=$((PASS+1)); echo "  PASS: 64-branch-control-chars-not-leaked"
+fi
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

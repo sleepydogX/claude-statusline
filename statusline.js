@@ -53,7 +53,11 @@ function readBranch(startDir) {
     if (!gitDir) return '';
     const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
     const ref = head.match(/^ref:\s*refs\/heads\/(.+)$/);
-    if (ref) return ref[1].trim();
+    if (ref) {
+      const name = ref[1].trim();
+      const safe = name.replace(/[\x00-\x1f\x7f]/g, '');
+      return safe === name ? safe : '';
+    }
     if (/^[0-9a-f]{7,40}$/i.test(head)) return head.slice(0, 7);
     return '';
   } catch (e) {
@@ -363,10 +367,10 @@ process.stdin.on('end', () => {
     let supabasePart = '';
 
     const repoInfo = data.workspace?.repo;
-    const payloadRepo = repoInfo && repoInfo.owner && repoInfo.name
+    const payloadRepo = repoInfo && typeof repoInfo.owner === 'string' && repoInfo.owner && typeof repoInfo.name === 'string' && repoInfo.name
       ? `${repoInfo.owner}/${repoInfo.name}`
       : '';
-    const payloadRepoUrl = payloadRepo && repoInfo.host
+    const payloadRepoUrl = payloadRepo && typeof repoInfo.host === 'string' && repoInfo.host
       ? `https://${repoInfo.host}/${repoInfo.owner}/${repoInfo.name}`
       : '';
     const branchName = readBranch(data.workspace?.current_dir || dir);
@@ -403,7 +407,7 @@ process.stdin.on('end', () => {
           }
           if (!branchName) {
             try {
-              const branch = execFileSync('git', ['branch', '--show-current'], { cwd, timeout: 2000 }).toString().trim();
+              const branch = execFileSync('git', ['branch', '--show-current'], { cwd: data.workspace?.current_dir || dir, timeout: 2000 }).toString().trim();
               if (branch) infoCache.gh_branch = branch;
             } catch (e) {}
           }
