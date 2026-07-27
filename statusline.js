@@ -375,7 +375,7 @@ process.stdin.on('end', () => {
       : '';
     const branchName = readBranch(data.workspace?.current_dir || dir);
     const worktreeName = typeof data.workspace?.git_worktree === 'string'
-      ? data.workspace.git_worktree
+      ? data.workspace.git_worktree.replace(/[\x00-\x1f\x7f]/g, '')
       : '';
 
     if (MODULES.github || MODULES.supabase) {
@@ -400,14 +400,14 @@ process.stdin.on('end', () => {
           // repo with no origin remote. Skipped entirely when the payload has it.
           if (!payloadRepo) {
             try {
-              const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000 }).toString().trim();
+              const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
               const repoMatch = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
               if (repoMatch) infoCache.gh_repo = repoMatch[1];
             } catch (e) {}
           }
           if (!branchName) {
             try {
-              const branch = execFileSync('git', ['branch', '--show-current'], { cwd: data.workspace?.current_dir || dir, timeout: 2000 }).toString().trim();
+              const branch = execFileSync('git', ['branch', '--show-current'], { cwd: data.workspace?.current_dir || dir, timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
               if (branch) infoCache.gh_branch = branch;
             } catch (e) {}
           }
@@ -452,7 +452,11 @@ process.stdin.on('end', () => {
       }
 
       if (MODULES.github) {
-        const repoName = payloadRepo || infoCache.gh_repo;
+        // Stripped here rather than relying on osc8: osc8 only sanitizes the
+        // linked-text path (payloadRepoUrl present), not the plain-text
+        // fallback, and infoCache.gh_repo comes from an unvalidated regex
+        // over `git remote get-url` output.
+        const repoName = (payloadRepo || infoCache.gh_repo).replace(/[\x00-\x1f\x7f]/g, '');
         const branch = branchName || infoCache.gh_branch;
         if (repoName) {
           // The link needs host, which the git fallback does not reconstruct;

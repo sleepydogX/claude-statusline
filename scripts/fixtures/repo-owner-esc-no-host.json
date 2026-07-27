@@ -1,0 +1,11 @@
+{
+  "session_id": "test-session-003",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": {
+    "current_dir": "/tmp/test",
+    "project_dir": "/tmp/test",
+    "repo": { "owner": "ma\u001b[31mHACKED\u001b[0m", "name": "n" }
+  },
+  "version": "2.1.220",
+  "output_style": { "name": "default" }
+}

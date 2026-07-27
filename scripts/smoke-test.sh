@@ -245,7 +245,7 @@ branch_out() {
 
 branch_case() {
   local name="$1" dir="$2" pattern="$3"
-  if branch_out "$dir" | grep -q "$pattern"; then
+  if branch_out "$dir" | grep -qE "$pattern"; then
     PASS=$((PASS+1)); echo "  PASS: $name"
   else
     FAIL=$((FAIL+1)); FAILED_TESTS+=("$name"); echo "  FAIL: $name"
@@ -255,8 +255,11 @@ branch_case() {
 # Test 58: a normal repo reports its branch
 branch_case "58-branch-from-head" "$BRANCHTMP/normal" "feature/x"
 
-# Test 59: a detached HEAD reports a 7-character short SHA
-branch_case "59-branch-detached-short-sha" "$BRANCHTMP/detached" "4073f59"
+# Test 59: a detached HEAD reports a 7-character short SHA. Anchored so a
+# non-hex (or end-of-line) character must immediately follow the 7th hex
+# digit — a plain substring match would also pass against the untruncated
+# 40-character SHA, which is exactly the regression this test is named for.
+branch_case "59-branch-detached-short-sha" "$BRANCHTMP/detached" "4073f59([^0-9a-f]|$)"
 
 # Test 60: a .git file with a gitdir: pointer resolves through it
 branch_case "60-branch-through-gitdir-file" "$BRANCHTMP/wt" "worktree-branch"
@@ -281,6 +284,17 @@ if echo "$out64" | grep -qE $'\x1b\\[31mHACKED'; then
 else
   PASS=$((PASS+1)); echo "  PASS: 64-branch-control-chars-not-leaked"
 fi
+
+# ── Final review fix: repoName/worktreeName sanitization ──
+
+# Test 65: workspace.repo.owner carrying a control-char escape, with NO host
+# key, must not leak it into the row. The plain-text fallback path (no host
+# means no osc8 call) is exactly what test 63 didn't cover.
+run_test "65-repo-owner-esc-no-host-not-leaked" "$FIXTURES/repo-owner-esc-no-host.json" "" "" $'\x1b\\[31mHACKED' "absent"
+
+# Test 66: workspace.git_worktree carrying a control-char escape must not
+# leak it into the row. git_worktree never passes through osc8 at all.
+run_test "66-worktree-esc-not-leaked" "$FIXTURES/worktree-esc.json" "" "" $'\x1b\\[31mHACKED' "absent"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
