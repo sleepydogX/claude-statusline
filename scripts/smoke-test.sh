@@ -134,6 +134,35 @@ run_test "38b-session-name-not-full-length" "$FIXTURES/payload-session-name-long
 # Test 39: a valid https PR url is emitted as an OSC 8 hyperlink
 run_test "39-osc8-emitted-for-https" "$FIXTURES/pr-open-approved.json" "" "" $'\x1b\\]8;;https://github.com/JawaSec/secops-portal/pull/412' "present"
 
+# ── Task 2: PR badge ──
+
+# Test 40: approved renders a green check
+run_test "40-pr-approved-symbol" "$FIXTURES/pr-open-approved.json" "" "" $'\x1b\\[32m.*#412 ✓' "present"
+
+# Test 41: changes_requested renders an orange cross
+run_test "41-pr-changes-symbol" "$FIXTURES/pr-open-changes.json" "" "" $'\x1b\\[38;5;208m.*#412 ✗' "present"
+
+# Test 42: pending renders a yellow filled dot
+run_test "42-pr-pending-symbol" "$FIXTURES/pr-open-pending.json" "" "" $'\x1b\\[33m.*#412 ●' "present"
+
+# Test 43: draft renders a dim hollow dot
+run_test "43-pr-draft-symbol" "$FIXTURES/pr-open-draft.json" "" "" $'\x1b\\[2m.*#412 ○' "present"
+
+# Test 44: a missing review_state renders the number with no symbol
+run_test "44-pr-no-state-number" "$FIXTURES/pr-no-review-state.json" "" "" "#412" "present"
+run_test "44b-pr-no-state-no-symbol" "$FIXTURES/pr-no-review-state.json" "" "" $'✓|✗|●|○' "absent"
+
+# Test 45: an unrecognized review_state is treated as absent
+run_test "45-pr-unknown-state-no-symbol" "$FIXTURES/pr-open-unknown-state.json" "" "" $'✓|✗|●|○' "absent"
+run_test "45b-pr-unknown-state-still-shows-number" "$FIXTURES/pr-open-unknown-state.json" "" "" "#412" "present"
+
+# Test 46: no pr field hides the segment
+run_test "46-pr-absent-hidden" "$FIXTURES/minimal.json" "" "" "🔀" "absent"
+
+# Test 47: a non-http url is not linked, but the number still renders
+run_test "47-pr-bad-url-no-link" "$FIXTURES/pr-bad-url.json" "" "" $'\x1b\\]8;;' "absent"
+run_test "47b-pr-bad-url-number-shown" "$FIXTURES/pr-bad-url.json" "" "" "#99" "present"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

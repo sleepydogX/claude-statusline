@@ -32,6 +32,7 @@ const MODULES = {
   effort: true,          // Reasoning effort level
   output_style: true,    // Active output style (added in T3)
   fast_mode: true,       // Fast mode indicator (added in T5)
+  pr: true,              // Open pull request for the current branch
 };
 
 // Load user overrides from config file if present
@@ -468,10 +469,29 @@ process.stdin.on('end', () => {
     // ROW 2: Effort + Output Style + Fast Mode + Session + Cost + Duration + Rate Limits
     const row2Cells = [effortPart, outputStylePart, fastModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
 
-    // Placeholder wiring, replaced by the full badge in Task 2.
-    const prPart = data.pr && data.pr.url && data.pr.number != null
-      ? osc8(data.pr.url, `#${data.pr.number}`)
-      : '';
+    // ── Pull request ──
+    // data.pr is present only while an open PR exists for the branch; it
+    // disappears once the PR merges or closes. review_state may be absent on
+    // its own, so the symbol is optional while the number is not.
+    let prPart = '';
+    if (MODULES.pr) {
+      try {
+        const pr = data.pr;
+        const number = pr && typeof pr.number === 'number' ? pr.number : null;
+        if (number != null) {
+          const states = {
+            approved:          { symbol: '✓', color: '\x1b[32m' },
+            changes_requested: { symbol: '✗', color: '\x1b[38;5;208m' },
+            pending:           { symbol: '●', color: '\x1b[33m' },
+            draft:             { symbol: '○', color: '\x1b[2m' },
+          };
+          const state = states[pr.review_state] || { symbol: '', color: '\x1b[1;37m' };
+          const label = state.symbol ? `#${number} ${state.symbol}` : `#${number}`;
+          const linked = osc8(pr.url, label);
+          prPart = `${state.color}\u{1F500} ${linked}\x1b[0m`;
+        }
+      } catch (e) { /* silent */ }
+    }
 
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, prPart, supabasePart].filter(Boolean);
