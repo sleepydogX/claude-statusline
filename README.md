@@ -31,13 +31,15 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 
 | Segment | Visible when | Shows |
 |---|---|---|
-| 🧠 effort | always | Current reasoning effort (`auto`/`low`/`medium`/`high`/`xhigh`/`max`). Reads `~/.claude/settings.json.effortLevel` and `CLAUDE_CODE_EFFORT_LEVEL` env (appends `*` if env overrides). |
+| 🧠 effort | always | Current reasoning effort (`auto`/`low`/`medium`/`high`/`xhigh`/`max`), read from the payload's `effort.level` so it tracks mid-session `/effort` changes. Falls back to `~/.claude/settings.json.effortLevel` and `CLAUDE_CODE_EFFORT_LEVEL` (appends `*`) when the payload omits the field. |
 | ✍ output_style | value ≠ `default` | Active output style name, prefixed with `style:` (e.g. `style: explanatory`, set via `/output-style`). |
-| 📋 permission_mode | value ≠ `default` | `PLAN`, `AUTO-EDIT`, or `BYPASS` (toggle with Shift+Tab). |
-| ⚡ fast_mode | `true` | Claude Code fast mode is on (toggled by `/fast`). |
-| 🔌 mcp_health | any server not `connected` | Which MCP servers are down (name for ≤2 failed, count for ≥3). |
+| ⚡ fast_mode | `true` | Claude Code fast mode is on, read from the payload's `fast_mode` (toggled by `/fast`). |
 
-All five can be disabled individually in `~/.claude/statusline-config.json`.
+All three can be disabled individually in `~/.claude/statusline-config.json`.
+
+The 🏷 session name comes from the payload's `session_name` — a `/rename` or `--name` value, otherwise the AI-generated title — and falls back to the transcript slug when neither exists.
+
+> **Removed in the payload-field cleanup:** the `permission_mode` and `mcp_health` segments read `permissionMode` and `mcp_servers`, which Claude Code does not send to status line commands, so they never rendered. Claude Code already shows the permission mode in its own footer and surfaces MCP errors beside the status line. Upgrading drops both toggles from your config automatically.
 
 ### Context Window Colors
 

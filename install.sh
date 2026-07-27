@@ -95,9 +95,7 @@ if [ "$UPGRADE_MODE" = false ]; then
   mod_context_bridge=$(ask_module "context_bridge" "Context metrics bridge (for other hooks)" "y" "🔗")
   mod_effort=$(ask_module "effort" "Reasoning effort (/effort level)" "y" "🧠")
   mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "✍ ")
-  mod_permission_mode=$(ask_module "permission_mode" "Permission mode indicator" "y" "📋")
   mod_fast_mode=$(ask_module "fast_mode" "Fast mode indicator" "y" "⚡")
-  mod_mcp_health=$(ask_module "mcp_health" "MCP server health" "y" "🔌")
 
   echo ""
   echo -e "${CYAN}${BOLD}  External integrations (require CLI tools):${RESET}"
@@ -164,9 +162,7 @@ if [ "$UPGRADE_MODE" = false ]; then
   "supabase": $mod_supabase,
   "effort": $mod_effort,
   "output_style": $mod_output_style,
-  "permission_mode": $mod_permission_mode,
-  "fast_mode": $mod_fast_mode,
-  "mcp_health": $mod_mcp_health
+  "fast_mode": $mod_fast_mode
 }
 EOF
 else
@@ -177,12 +173,15 @@ else
     const defaults = {
       session_name: true, cost: true, duration: true, rate_limits: true,
       lines_changed: true, context_bridge: true, github: true, supabase: true,
-      effort: true, output_style: true, permission_mode: true,
-      fast_mode: true, mcp_health: true,
+      effort: true, output_style: true, fast_mode: true,
     };
     let cur = {};
     try { cur = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) {}
     const merged = { ...defaults, ...cur };
+    // Segments removed in the payload-field cleanup: Claude Code never emitted
+    // the fields they read, so drop the stale toggles from existing configs.
+    delete merged.permission_mode;
+    delete merged.mcp_health;
     fs.writeFileSync(p, JSON.stringify(merged, null, 2) + "\n");
   ' "$CONFIG_FILE"
 fi

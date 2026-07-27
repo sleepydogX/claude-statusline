@@ -1,0 +1,8 @@
+{
+  "session_id": "test-session-001",
+  "session_name": "this is an extremely long session name that must be truncated before it wrecks the row",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": { "current_dir": "/tmp/test", "project_dir": "/tmp/test" },
+  "version": "2.1.220",
+  "output_style": { "name": "default" }
+}
