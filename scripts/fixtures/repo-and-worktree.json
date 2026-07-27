@@ -1,0 +1,12 @@
+{
+  "session_id": "test-session-001",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": {
+    "current_dir": "/tmp/test",
+    "project_dir": "/tmp/test",
+    "git_worktree": "fix-auth",
+    "repo": { "host": "github.com", "owner": "JawaSec", "name": "secops-portal" }
+  },
+  "version": "2.1.220",
+  "output_style": { "name": "default" }
+}

@@ -13,4 +13,4 @@ if [ -n "$SETTINGS" ] && [ -f "$SETTINGS" ]; then
   cp "$SETTINGS" "$SANDBOX/.claude/settings.json"
 fi
 
-HOME="$SANDBOX" node "$REPO_DIR/statusline.js" < "$FIXTURE"
+HOME="$SANDBOX" "$(command -v node)" "$REPO_DIR/statusline.js" < "$FIXTURE"

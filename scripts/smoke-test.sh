@@ -167,6 +167,102 @@ run_test "47b-pr-bad-url-number-shown" "$FIXTURES/pr-bad-url.json" "" "" "#99" "
 # the states lookup map and print the literal string "undefined"
 run_test "48-pr-proto-state-no-undefined" "$FIXTURES/pr-open-proto-state.json" "" "" "undefined" "absent"
 
+# ── Task 3: payload-sourced repo/worktree and filesystem branch ──
+
+# Test 53: workspace.repo renders owner/name
+run_test "53-repo-from-payload" "$FIXTURES/repo-and-worktree.json" "" "" "JawaSec/secops-portal" "present"
+
+# Test 54: the repo is a clickable link built from host/owner/name
+run_test "54-repo-linked" "$FIXTURES/repo-and-worktree.json" "" "" $'\x1b\\]8;;https://github.com/JawaSec/secops-portal' "present"
+
+# Test 55: workspace.git_worktree renders the worktree name
+run_test "55-worktree-shown" "$FIXTURES/repo-and-worktree.json" "" "" "🌳 fix-auth" "present"
+
+# Test 56: no git_worktree hides the worktree piece
+run_test "56-worktree-absent-hidden" "$FIXTURES/minimal.json" "" "" "🌳" "absent"
+
+# Test 57: with workspace.repo present, no git binary is needed at all.
+# PATH_NO_GIT mirrors every executable reachable from the real PATH (so the
+# runner, bash, node and other standard tools still work) except any binary
+# literally named "git" — that omission is the whole point of the test.
+PATH_NO_GIT="$(mktemp -d)"
+IFS=':' read -ra _no_git_dirs <<< "$PATH"
+for _d in "${_no_git_dirs[@]}"; do
+  [ -d "$_d" ] || continue
+  for _f in "$_d"/*; do
+    [ -e "$_f" ] || continue
+    _b="$(basename "$_f")"
+    [ "$_b" = "git" ] && continue
+    [ -e "$PATH_NO_GIT/$_b" ] || ln -s "$_f" "$PATH_NO_GIT/$_b" 2>/dev/null
+  done
+done
+if env -i HOME=/tmp PATH="$PATH_NO_GIT" bash "$RUNNER" "$FIXTURES/repo-and-worktree.json" "" 2>/dev/null | grep -q "JawaSec/secops-portal"; then
+  PASS=$((PASS+1)); echo "  PASS: 57-repo-without-git-binary"
+else
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("57-repo-without-git-binary"); echo "  FAIL: 57-repo-without-git-binary"
+fi
+rm -rf "$PATH_NO_GIT"
+
+# ── Branch resolution from .git/HEAD ──
+# These build real directories with synthetic .git entries, so they call
+# PASS/FAIL directly rather than run_test, which takes a fixed fixture path.
+
+BRANCHTMP="$(mktemp -d)"
+trap 'rm -rf "$BRANCHTMP"' EXIT
+
+# (a) ordinary repo on a branch
+mkdir -p "$BRANCHTMP/normal/.git"
+echo "ref: refs/heads/feature/x" > "$BRANCHTMP/normal/.git/HEAD"
+
+# (b) detached HEAD
+mkdir -p "$BRANCHTMP/detached/.git"
+echo "4073f59596e272f39393db4f96abc5f4b10eff21" > "$BRANCHTMP/detached/.git/HEAD"
+
+# (c) worktree: .git is a FILE pointing elsewhere
+mkdir -p "$BRANCHTMP/wt-real"
+echo "ref: refs/heads/worktree-branch" > "$BRANCHTMP/wt-real/HEAD"
+mkdir -p "$BRANCHTMP/wt"
+echo "gitdir: $BRANCHTMP/wt-real" > "$BRANCHTMP/wt/.git"
+
+# (d) nested two levels below the repo root
+mkdir -p "$BRANCHTMP/normal/src/deep"
+
+# (e) no .git anywhere
+mkdir -p "$BRANCHTMP/bare"
+
+# Emit a payload whose repo comes from the payload (so githubPart renders without
+# git) but whose current_dir points at the directory under test.
+branch_out() {
+  local dir="$1"
+  printf '{"session_id":"t","model":{"display_name":"Claude Opus 4.7"},"workspace":{"current_dir":"%s","project_dir":"%s","repo":{"host":"github.com","owner":"o","name":"n"}},"version":"2.1.220","output_style":{"name":"default"}}' "$dir" "$dir" \
+    > "$BRANCHTMP/payload.json"
+  env -i HOME=/tmp PATH="$PATH" bash "$RUNNER" "$BRANCHTMP/payload.json" "" 2>/dev/null || true
+}
+
+branch_case() {
+  local name="$1" dir="$2" pattern="$3"
+  if branch_out "$dir" | grep -q "$pattern"; then
+    PASS=$((PASS+1)); echo "  PASS: $name"
+  else
+    FAIL=$((FAIL+1)); FAILED_TESTS+=("$name"); echo "  FAIL: $name"
+  fi
+}
+
+# Test 58: a normal repo reports its branch
+branch_case "58-branch-from-head" "$BRANCHTMP/normal" "feature/x"
+
+# Test 59: a detached HEAD reports a 7-character short SHA
+branch_case "59-branch-detached-short-sha" "$BRANCHTMP/detached" "4073f59"
+
+# Test 60: a .git file with a gitdir: pointer resolves through it
+branch_case "60-branch-through-gitdir-file" "$BRANCHTMP/wt" "worktree-branch"
+
+# Test 61: a subdirectory walks up to the repo root
+branch_case "61-branch-walks-up" "$BRANCHTMP/normal/src/deep" "feature/x"
+
+# Test 62: no .git anywhere renders without a branch and without crashing
+branch_case "62-no-git-still-renders" "$BRANCHTMP/bare" "Claude Opus"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

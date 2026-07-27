@@ -19,6 +19,48 @@ function osc8(url, text) {
   return `\x1b]8;;${url}\x07${safeText}\x1b]8;;\x07`;
 }
 
+// Resolve the git directory for startDir, walking up at most MAX_GIT_WALKUP
+// levels. A .git FILE rather than a directory means a worktree or submodule; it
+// holds a "gitdir: <path>" pointer, which may be relative to the file's own
+// directory. Returns '' when nothing is found.
+const MAX_GIT_WALKUP = 10;
+function resolveGitDir(startDir) {
+  let dir = startDir;
+  for (let i = 0; i < MAX_GIT_WALKUP; i++) {
+    const candidate = path.join(dir, '.git');
+    try {
+      const stat = fs.statSync(candidate);
+      if (stat.isDirectory()) return candidate;
+      if (stat.isFile()) {
+        const pointer = fs.readFileSync(candidate, 'utf8').match(/gitdir:\s*(.+)/);
+        if (!pointer) return '';
+        const target = pointer[1].trim();
+        return path.isAbsolute(target) ? target : path.resolve(dir, target);
+      }
+    } catch (e) { /* not here; keep walking */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;  // filesystem root
+    dir = parent;
+  }
+  return '';
+}
+
+// Read the current branch from HEAD. A "ref: refs/heads/NAME" line yields NAME;
+// anything else is a detached HEAD, reported as a 7-character short SHA.
+function readBranch(startDir) {
+  try {
+    const gitDir = resolveGitDir(startDir);
+    if (!gitDir) return '';
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    const ref = head.match(/^ref:\s*refs\/heads\/(.+)$/);
+    if (ref) return ref[1].trim();
+    if (/^[0-9a-f]{7,40}$/i.test(head)) return head.slice(0, 7);
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
 // ── Module toggles (set by install script) ──
 const MODULES = {
   session_name: true,    // Session slug display
@@ -313,10 +355,24 @@ process.stdin.on('end', () => {
       }
     }
 
-    // ── GitHub & Supabase info (cached) ──
+    // ── Row 3: git context (payload-sourced, uncached) ──
+    // repo, worktree and branch cost nothing to obtain, so they are read fresh on
+    // every invocation. Only gh/supabase go through the cache below.
     const { execFileSync } = require('child_process');
     let githubPart = '';
     let supabasePart = '';
+
+    const repoInfo = data.workspace?.repo;
+    const payloadRepo = repoInfo && repoInfo.owner && repoInfo.name
+      ? `${repoInfo.owner}/${repoInfo.name}`
+      : '';
+    const payloadRepoUrl = payloadRepo && repoInfo.host
+      ? `https://${repoInfo.host}/${repoInfo.owner}/${repoInfo.name}`
+      : '';
+    const branchName = readBranch(data.workspace?.current_dir || dir);
+    const worktreeName = typeof data.workspace?.git_worktree === 'string'
+      ? data.workspace.git_worktree
+      : '';
 
     if (MODULES.github || MODULES.supabase) {
       const sessionSafeForCache = session && !/[/\\]|\.\./.test(session);
@@ -336,15 +392,21 @@ process.stdin.on('end', () => {
         const cwd = data.workspace?.project_dir || dir;
 
         if (MODULES.github) {
-          try {
-            const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000 }).toString().trim();
-            const repoMatch = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
-            if (repoMatch) infoCache.gh_repo = repoMatch[1];
-          } catch (e) {}
-          try {
-            const branch = execFileSync('git', ['branch', '--show-current'], { cwd, timeout: 2000 }).toString().trim();
-            if (branch) infoCache.gh_branch = branch;
-          } catch (e) {}
+          // Fallbacks only: Claude Code builds that predate workspace.repo, or a
+          // repo with no origin remote. Skipped entirely when the payload has it.
+          if (!payloadRepo) {
+            try {
+              const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000 }).toString().trim();
+              const repoMatch = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
+              if (repoMatch) infoCache.gh_repo = repoMatch[1];
+            } catch (e) {}
+          }
+          if (!branchName) {
+            try {
+              const branch = execFileSync('git', ['branch', '--show-current'], { cwd, timeout: 2000 }).toString().trim();
+              if (branch) infoCache.gh_branch = branch;
+            } catch (e) {}
+          }
           try {
             const ghStatus = execFileSync('gh', ['auth', 'status'], { timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
             const combined = ghStatus.toString();
@@ -385,11 +447,19 @@ process.stdin.on('end', () => {
         }
       }
 
-      if (MODULES.github && infoCache.gh_repo) {
-        const repoPart = `\x1b[1;37m\u{1F419} ${infoCache.gh_repo}\x1b[0m`;
-        const branchStr = infoCache.gh_branch ? ` \x1b[1;32m\u238B ${infoCache.gh_branch}\x1b[0m` : '';
-        const userStr = infoCache.gh_user ? ` \x1b[2m@${infoCache.gh_user}\x1b[0m` : '';
-        githubPart = `${repoPart}${branchStr}${userStr}`;
+      if (MODULES.github) {
+        const repoName = payloadRepo || infoCache.gh_repo;
+        const branch = branchName || infoCache.gh_branch;
+        if (repoName) {
+          // The link needs host, which the git fallback does not reconstruct;
+          // without it the repo renders as plain text.
+          const repoLabel = payloadRepoUrl ? osc8(payloadRepoUrl, repoName) : repoName;
+          const repoStr = `\x1b[1;37m\u{1F419} ${repoLabel}\x1b[0m`;
+          const branchStr = branch ? ` \x1b[1;32m\u238B ${branch}\x1b[0m` : '';
+          const worktreeStr = worktreeName ? ` \x1b[1;38;5;114m\u{1F333} ${worktreeName}\x1b[0m` : '';
+          const userStr = infoCache.gh_user ? ` \x1b[2m@${infoCache.gh_user}\x1b[0m` : '';
+          githubPart = `${repoStr}${branchStr}${worktreeStr}${userStr}`;
+        }
       }
 
       if (MODULES.supabase && infoCache.sb_project) {
