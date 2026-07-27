@@ -8,14 +8,14 @@ const path = require('path');
 const os = require('os');
 
 // Wrap text in an OSC 8 hyperlink. Only http(s) URLs free of control characters
-// are linked; text is coerced to a string and stripped of the same control
-// characters before interpolation. Together this guarantees neither the URL
-// nor the visible text can inject escape sequences into the row.
+// are linked. On every exit path, text is coerced to a string and stripped of
+// the same control characters before it is returned, so neither the URL nor
+// the visible text can inject escape sequences into the row.
 // Terminals without OSC 8 support ignore the sequence and show the text.
 function osc8(url, text) {
-  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return text;
-  if (/[\x00-\x1f\x7f]/.test(url)) return text;
   const safeText = String(text).replace(/[\x00-\x1f\x7f]/g, '');
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return safeText;
+  if (/[\x00-\x1f\x7f]/.test(url)) return safeText;
   return `\x1b]8;;${url}\x07${safeText}\x1b]8;;\x07`;
 }
 
