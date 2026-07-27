@@ -3,13 +3,13 @@
 A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that displays session metrics, project context, and service integrations at a glance.
 
 ```
-────────────────────────────────────────────────────────────────────────────
- ⬡ Opus 4.6 (1M context) v2.1.98 │ 📂 ~/projects/my-app │ +90 -17 │ ██░░░░░░░░ CTX 7%
-────────────────────────────────────────────────────────────────────────────
- 🏷 Tender Discovering Forest │ 💰 $1.84 │ ⏱ 23m15s │ ⚡5h 16% 3h42m │ 📅7d 17%
-────────────────────────────────────────────────────────────────────────────
- 🐙 user/repo ⎇ main @user │ ⚡ my-supabase-project
-────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ⬡ Opus 4.6 (1M context) v2.1.98 │ 📂 ~/projects/my-app │ +90 -17 │ ░░░░░░░░░░ CTX 8%
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 🧠 HIGH │ ✍ style: explanatory │ ⚡ FAST │ 🏷 Tender Discovering Forest │ 💰 $1.84 │ ⏱ 23m15s │ ⚡5h 16% 3h40m │ 📅7d 17%
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 🐙 JawaSec/secops-portal ⎋ dev/kenneth 🌳 fix-auth @jawkgonzalez │ 🔀 #412 ✓
+────────────────────────────────────────────────────────────────────────────────────────────────────
 ```
 
 ## Features
@@ -64,8 +64,9 @@ directory has a branch or an active worktree.
 
 The PR badge marks the review state: ✓ approved, ✗ changes requested,
 ● pending, ○ draft. A PR with no review state shows the number alone. The
-`pr` module is independent of `github` — it renders whenever the payload
-carries a `pr` object, whether or not the repo/branch group is visible.
+`pr` module is independent of `github` — it renders whenever the payload's
+`pr` object has a numeric `number` field, whether or not the repo/branch
+group is visible. A `pr` object without a numeric `number` renders nothing.
 
 Repo, branch and worktree come from the status line payload or a direct
 `.git/HEAD` read, so in the common case they cost no subprocess and refresh
@@ -123,6 +124,10 @@ The interactive installer will guide you through module selection:
   ⚡ Rate limits (5h + 7d usage) (Y/n):
   📊 Lines added/removed (Y/n):
   🔗 Context metrics bridge (for other hooks) (Y/n):
+  🧠 Reasoning effort (/effort level) (Y/n):
+  ✍  Output style (/output-style) (Y/n):
+  ⚡ Fast mode indicator (Y/n):
+  🔀 Open pull request badge (Y/n):
 
   External integrations (require CLI tools):
 
@@ -143,7 +148,11 @@ Module toggles are stored in `~/.claude/statusline-config.json`:
   "lines_changed": true,
   "context_bridge": true,
   "github": true,
-  "supabase": false
+  "supabase": false,
+  "effort": true,
+  "output_style": true,
+  "fast_mode": true,
+  "pr": true
 }
 ```
 
