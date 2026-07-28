@@ -189,14 +189,17 @@ process.stdin.on('end', () => {
         if (invalid) {
           effortPart = `\x1b[2m\u{1F9E0} ?\x1b[0m`;
         } else {
-          const colorMap = {
+          // Null prototype so a level named after an Object.prototype member
+          // cannot resolve to an inherited value, which would be truthy and
+          // skip the `||` default, interpolating `undefined` into the row.
+          const colorMap = Object.assign(Object.create(null), {
             auto:   '\x1b[3m',
             low:    '\x1b[38;5;245m',
             medium: '\x1b[32m',
             high:   '\x1b[33m',
             xhigh:  '\x1b[38;5;208m',
             max:    '\x1b[1;35m',
-          };
+          });
           const color = colorMap[display] || '\x1b[0m';
           const label = display === 'auto' ? 'auto' : display.toUpperCase();
           const marker = isOverride ? '*' : '';
@@ -370,123 +373,135 @@ process.stdin.on('end', () => {
     // ── Row 3: git context (payload-sourced, uncached) ──
     // repo, worktree and branch cost nothing to obtain, so they are read fresh on
     // every invocation. Only gh/supabase go through the cache below.
-    const { execFileSync } = require('child_process');
+    // Wrapped in its own try/catch like every other segment: without it a
+    // throw here would blank the entire status line rather than this row.
     let githubPart = '';
     let supabasePart = '';
+    try {
+      const { execFileSync } = require('child_process');
 
-    const repoInfo = data.workspace?.repo;
-    const payloadRepo = repoInfo && typeof repoInfo.owner === 'string' && repoInfo.owner && typeof repoInfo.name === 'string' && repoInfo.name
-      ? `${repoInfo.owner}/${repoInfo.name}`
-      : '';
-    const payloadRepoUrl = payloadRepo && typeof repoInfo.host === 'string' && repoInfo.host
-      ? `https://${repoInfo.host}/${repoInfo.owner}/${repoInfo.name}`
-      : '';
-    const branchName = readBranch(data.workspace?.current_dir || dir);
-    const worktreeName = typeof data.workspace?.git_worktree === 'string'
-      ? stripControl(data.workspace.git_worktree)
-      : '';
+      const repoInfo = data.workspace?.repo;
+      const payloadRepo = repoInfo && typeof repoInfo.owner === 'string' && repoInfo.owner && typeof repoInfo.name === 'string' && repoInfo.name
+        ? `${repoInfo.owner}/${repoInfo.name}`
+        : '';
+      const payloadRepoUrl = payloadRepo && typeof repoInfo.host === 'string' && repoInfo.host
+        ? `https://${repoInfo.host}/${repoInfo.owner}/${repoInfo.name}`
+        : '';
+      const branchName = readBranch(data.workspace?.current_dir || dir);
+      const worktreeName = typeof data.workspace?.git_worktree === 'string'
+        ? stripControl(data.workspace.git_worktree)
+        : '';
 
-    if (MODULES.github || MODULES.supabase) {
-      const sessionSafeForCache = session && !/[/\\]|\.\./.test(session);
-      const infoCachePath = sessionSafeForCache ? path.join(os.tmpdir(), `claude-info-${session}.json`) : null;
-      const CACHE_TTL_MS = 120000;
+      if (MODULES.github || MODULES.supabase) {
+        const sessionSafeForCache = session && !/[/\\]|\.\./.test(session);
+        const infoCachePath = sessionSafeForCache ? path.join(os.tmpdir(), `claude-info-${session}.json`) : null;
+        const CACHE_TTL_MS = 120000;
 
-      let infoCache = null;
-      if (infoCachePath && fs.existsSync(infoCachePath)) {
-        try {
-          infoCache = JSON.parse(fs.readFileSync(infoCachePath, 'utf8'));
-          if (Date.now() - infoCache.ts > CACHE_TTL_MS) infoCache = null;
-        } catch (e) { infoCache = null; }
-      }
+        let infoCache = null;
+        if (infoCachePath && fs.existsSync(infoCachePath)) {
+          try {
+            infoCache = JSON.parse(fs.readFileSync(infoCachePath, 'utf8'));
+            if (Date.now() - infoCache.ts > CACHE_TTL_MS) infoCache = null;
+          } catch (e) { infoCache = null; }
+        }
 
-      if (!infoCache) {
-        infoCache = { ts: Date.now(), gh_repo: '', gh_user: '', gh_branch: '', sb_project: '' };
-        const cwd = data.workspace?.project_dir || dir;
+        if (!infoCache) {
+          infoCache = { ts: Date.now(), gh_repo: '', gh_user: '', sb_project: '' };
+          const cwd = data.workspace?.project_dir || dir;
+
+          if (MODULES.github) {
+            // Fallback only: Claude Code builds that predate workspace.repo, or a
+            // repo with no origin remote. Skipped entirely when the payload has it.
+            //
+            // There is deliberately no branch fallback. readBranch covers every
+            // real case — it walks up to the repo root, follows the gitdir:
+            // pointer of worktrees and submodules, and handles a detached HEAD —
+            // and caching a branch is actively wrong: the cached value outlives a
+            // checkout, so the row would show a branch you already left.
+            if (!payloadRepo) {
+              try {
+                const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+                const repoMatch = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
+                if (repoMatch) infoCache.gh_repo = repoMatch[1];
+              } catch (e) {}
+            }
+            try {
+              const ghStatus = execFileSync('gh', ['auth', 'status'], { timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
+              const combined = ghStatus.toString();
+              const activeMatch = combined.match(/account (\S+)[\s\S]*?Active account: true/);
+              if (activeMatch) infoCache.gh_user = activeMatch[1];
+            } catch (e) {
+              if (e.stderr) {
+                const errStr = e.stderr.toString();
+                const activeMatch = errStr.match(/account (\S+)[\s\S]*?Active account: true/);
+                if (activeMatch) infoCache.gh_user = activeMatch[1];
+              }
+            }
+          }
+
+          if (MODULES.supabase) {
+            try {
+              const sbStatus = execFileSync('supabase', ['status'], { cwd, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).toString();
+              const refMatch = sbStatus.match(/(?:API URL|Project ref):\s*(?:https?:\/\/)?(\S+)/);
+              if (refMatch) {
+                const ref = refMatch[1].replace('.supabase.co', '');
+                infoCache.sb_project = ref;
+                try {
+                  const sbList = execFileSync('supabase', ['projects', 'list'], { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).toString();
+                  for (const line of sbList.split('\n')) {
+                    if (line.includes(ref)) {
+                      const cols = line.split('|').map(c => c.trim());
+                      if (cols.length >= 4 && cols[3]) infoCache.sb_project = cols[3];
+                      break;
+                    }
+                  }
+                } catch (e) {}
+              }
+            } catch (e) {}
+          }
+
+          if (infoCachePath) {
+            try { fs.writeFileSync(infoCachePath, JSON.stringify(infoCache)); } catch (e) {}
+          }
+        }
 
         if (MODULES.github) {
-          // Fallbacks only: Claude Code builds that predate workspace.repo, or a
-          // repo with no origin remote. Skipped entirely when the payload has it.
-          if (!payloadRepo) {
-            try {
-              const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-              const repoMatch = remote.match(/github\.com[:/](.+?)(?:\.git)?$/);
-              if (repoMatch) infoCache.gh_repo = repoMatch[1];
-            } catch (e) {}
-          }
-          if (!branchName) {
-            try {
-              const branch = execFileSync('git', ['branch', '--show-current'], { cwd: data.workspace?.current_dir || dir, timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-              if (branch) infoCache.gh_branch = branch;
-            } catch (e) {}
-          }
-          try {
-            const ghStatus = execFileSync('gh', ['auth', 'status'], { timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
-            const combined = ghStatus.toString();
-            const activeMatch = combined.match(/account (\S+)[\s\S]*?Active account: true/);
-            if (activeMatch) infoCache.gh_user = activeMatch[1];
-          } catch (e) {
-            if (e.stderr) {
-              const errStr = e.stderr.toString();
-              const activeMatch = errStr.match(/account (\S+)[\s\S]*?Active account: true/);
-              if (activeMatch) infoCache.gh_user = activeMatch[1];
-            }
+          // Stripped here rather than relying on osc8: osc8 only sanitizes the
+          // linked-text path (payloadRepoUrl present), not the plain-text
+          // fallback, and infoCache.gh_repo/gh_user come from unvalidated
+          // regexes over `git`/`gh` subprocess output.
+          //
+          // These strip and still render, while readBranch drops a ref outright
+          // when stripping changed it. That asymmetry is deliberate: the branch
+          // is a value you act on — a mangled name that reads like `main` could
+          // have you commit somewhere you did not intend — so a suspect one is
+          // better hidden than shown. Repo, worktree, account and project are
+          // informational, and showing them inert beats hiding them silently,
+          // because visible garbage tells you something is wrong.
+          const repoName = stripControl(payloadRepo || infoCache.gh_repo);
+          const branch = stripControl(branchName);
+          const ghUser = stripControl(infoCache.gh_user);
+          if (repoName) {
+            // The link needs host, which the git fallback does not reconstruct;
+            // without it the repo renders as plain text.
+            const repoLabel = payloadRepoUrl ? osc8(payloadRepoUrl, repoName) : repoName;
+            const repoStr = `\x1b[1;37m\u{1F419} ${repoLabel}\x1b[0m`;
+            const branchStr = branch ? ` \x1b[1;32m\u238B ${branch}\x1b[0m` : '';
+            const worktreeStr = worktreeName ? ` \x1b[1;38;5;114m\u{1F333} ${worktreeName}\x1b[0m` : '';
+            const userStr = ghUser ? ` \x1b[2m@${ghUser}\x1b[0m` : '';
+            githubPart = `${repoStr}${branchStr}${worktreeStr}${userStr}`;
           }
         }
 
         if (MODULES.supabase) {
-          try {
-            const sbStatus = execFileSync('supabase', ['status'], { cwd, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).toString();
-            const refMatch = sbStatus.match(/(?:API URL|Project ref):\s*(?:https?:\/\/)?(\S+)/);
-            if (refMatch) {
-              const ref = refMatch[1].replace('.supabase.co', '');
-              infoCache.sb_project = ref;
-              try {
-                const sbList = execFileSync('supabase', ['projects', 'list'], { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).toString();
-                for (const line of sbList.split('\n')) {
-                  if (line.includes(ref)) {
-                    const cols = line.split('|').map(c => c.trim());
-                    if (cols.length >= 4 && cols[3]) infoCache.sb_project = cols[3];
-                    break;
-                  }
-                }
-              } catch (e) {}
-            }
-          } catch (e) {}
-        }
-
-        if (infoCachePath) {
-          try { fs.writeFileSync(infoCachePath, JSON.stringify(infoCache)); } catch (e) {}
+          // Sourced from an unvalidated regex over `supabase status`/`projects list`.
+          const sbProject = stripControl(infoCache.sb_project);
+          if (sbProject) {
+            supabasePart = `\x1b[1;38;5;42m\u26A1 ${sbProject}\x1b[0m`;
+          }
         }
       }
-
-      if (MODULES.github) {
-        // Stripped here rather than relying on osc8: osc8 only sanitizes the
-        // linked-text path (payloadRepoUrl present), not the plain-text
-        // fallback, and infoCache.gh_repo/gh_branch/gh_user come from
-        // unvalidated regexes over `git`/`gh` subprocess output.
-        const repoName = stripControl(payloadRepo || infoCache.gh_repo);
-        const branch = stripControl(branchName || infoCache.gh_branch);
-        const ghUser = stripControl(infoCache.gh_user);
-        if (repoName) {
-          // The link needs host, which the git fallback does not reconstruct;
-          // without it the repo renders as plain text.
-          const repoLabel = payloadRepoUrl ? osc8(payloadRepoUrl, repoName) : repoName;
-          const repoStr = `\x1b[1;37m\u{1F419} ${repoLabel}\x1b[0m`;
-          const branchStr = branch ? ` \x1b[1;32m\u238B ${branch}\x1b[0m` : '';
-          const worktreeStr = worktreeName ? ` \x1b[1;38;5;114m\u{1F333} ${worktreeName}\x1b[0m` : '';
-          const userStr = ghUser ? ` \x1b[2m@${ghUser}\x1b[0m` : '';
-          githubPart = `${repoStr}${branchStr}${worktreeStr}${userStr}`;
-        }
-      }
-
-      if (MODULES.supabase) {
-        // Sourced from an unvalidated regex over `supabase status`/`projects list`.
-        const sbProject = stripControl(infoCache.sb_project);
-        if (sbProject) {
-          supabasePart = `\x1b[1;38;5;42m\u26A1 ${sbProject}\x1b[0m`;
-        }
-      }
-    }
+    } catch (e) { /* silent */ }
 
     // ── Build display components ──
     const shortPath = (() => {
@@ -568,7 +583,9 @@ process.stdin.on('end', () => {
     if (MODULES.pr) {
       try {
         const pr = data.pr;
-        const number = pr && typeof pr.number === 'number' ? pr.number : null;
+        // A PR number is a positive integer. `typeof === 'number'` alone would
+        // also admit 3.5 and -5, rendering `#3.5` / `#-5`.
+        const number = pr && Number.isInteger(pr.number) && pr.number > 0 ? pr.number : null;
         if (number != null) {
           const states = Object.assign(Object.create(null), {
             approved:          { symbol: '✓', color: '\x1b[32m' },

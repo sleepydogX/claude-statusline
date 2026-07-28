@@ -181,27 +181,64 @@ run_test "55-worktree-shown" "$FIXTURES/repo-and-worktree.json" "" "" "🌳 fix-
 # Test 56: no git_worktree hides the worktree piece
 run_test "56-worktree-absent-hidden" "$FIXTURES/minimal.json" "" "" "🌳" "absent"
 
-# Test 57: with workspace.repo present, no git binary is needed at all.
-# PATH_NO_GIT mirrors every executable reachable from the real PATH (so the
-# runner, bash, node and other standard tools still work) except any binary
-# literally named "git" — that omission is the whole point of the test.
-PATH_NO_GIT="$(mktemp -d)"
-IFS=':' read -ra _no_git_dirs <<< "$PATH"
-for _d in "${_no_git_dirs[@]}"; do
-  [ -d "$_d" ] || continue
-  for _f in "$_d"/*; do
-    [ -e "$_f" ] || continue
-    _b="$(basename "$_f")"
-    [ "$_b" = "git" ] && continue
-    [ -e "$PATH_NO_GIT/$_b" ] || ln -s "$_f" "$PATH_NO_GIT/$_b" 2>/dev/null
-  done
+# Test 57: with workspace.repo present, git is never SPAWNED.
+#
+# An earlier version removed git from PATH and asserted the repo still
+# rendered. That proves too little: the code swallows ENOENT, so a regression
+# that re-enabled the git fallback would still have rendered and still passed.
+# Instead, put a fake `git` first on PATH that records every invocation to a
+# sentinel file. The repo must render AND the sentinel must stay empty.
+#
+# Only the interpreters the runner needs are mirrored, so this no longer pays
+# the 3s+5s timeouts of a reachable `gh` and `supabase`.
+SPYDIR="$(mktemp -d)"
+SENTINEL="$SPYDIR/git-was-called"
+mkdir -p "$SPYDIR/bin" "$SPYDIR/tmp" "$SPYDIR/work"
+for _b in bash node env dirname pwd mktemp rm cp mkdir; do
+  _p="$(command -v "$_b" 2>/dev/null)" && ln -sf "$_p" "$SPYDIR/bin/$_b"
 done
-if env -i HOME=/tmp PATH="$PATH_NO_GIT" bash "$RUNNER" "$FIXTURES/repo-and-worktree.json" "" 2>/dev/null | grep -q "JawaSec/secops-portal"; then
-  PASS=$((PASS+1)); echo "  PASS: 57-repo-without-git-binary"
+cat > "$SPYDIR/bin/git" <<SPY
+#!/bin/sh
+echo "git \$*" >> "$SENTINEL"
+exit 1
+SPY
+chmod +x "$SPYDIR/bin/git"
+
+# current_dir must be a directory that EXISTS. With a non-existent cwd,
+# execFileSync fails at the chdir before the binary is ever executed, so the
+# spy would never fire and the assertion below would be vacuous.
+# TMPDIR is isolated too, so a stale info-cache from an earlier run cannot
+# short-circuit the block and empty the sentinel for the wrong reason.
+_spy_run() {  # $1 = payload json, writes output to stdout
+  printf '%s' "$1" > "$SPYDIR/payload.json"
+  env -i HOME=/tmp TMPDIR="$SPYDIR/tmp" PATH="$SPYDIR/bin" \
+    bash "$RUNNER" "$SPYDIR/payload.json" "" 2>/dev/null || true
+}
+_WITH_REPO='{"session_id":"spy-with-repo","model":{"display_name":"C"},"workspace":{"current_dir":"'"$SPYDIR/work"'","project_dir":"'"$SPYDIR/work"'","repo":{"host":"github.com","owner":"JawaSec","name":"secops-portal"}},"version":"2.1.220","output_style":{"name":"default"}}'
+_NO_REPO='{"session_id":"spy-no-repo","model":{"display_name":"C"},"workspace":{"current_dir":"'"$SPYDIR/work"'","project_dir":"'"$SPYDIR/work"'"},"version":"2.1.220","output_style":{"name":"default"}}'
+
+if _spy_run "$_WITH_REPO" | grep -q "JawaSec/secops-portal"; then
+  PASS=$((PASS+1)); echo "  PASS: 57-repo-renders-from-payload"
 else
-  FAIL=$((FAIL+1)); FAILED_TESTS+=("57-repo-without-git-binary"); echo "  FAIL: 57-repo-without-git-binary"
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("57-repo-renders-from-payload"); echo "  FAIL: 57-repo-renders-from-payload"
 fi
-rm -rf "$PATH_NO_GIT"
+if [ -s "$SENTINEL" ]; then
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("57b-no-git-spawned (git was invoked: $(tr '\n' ';' < "$SENTINEL"))"); echo "  FAIL: 57b-no-git-spawned"
+else
+  PASS=$((PASS+1)); echo "  PASS: 57b-no-git-spawned"
+fi
+
+# Control: without workspace.repo the fallback SHOULD spawn git. This is what
+# makes 57b meaningful — it proves the spy can detect a spawn at all, so an
+# empty sentinel above is evidence rather than an artifact of a broken probe.
+: > "$SENTINEL"
+_spy_run "$_NO_REPO" > /dev/null
+if [ -s "$SENTINEL" ]; then
+  PASS=$((PASS+1)); echo "  PASS: 57c-fallback-does-spawn-git-without-payload-repo"
+else
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("57c-fallback-does-spawn-git-without-payload-repo (spy never fired; 57b proves nothing)"); echo "  FAIL: 57c-fallback-does-spawn-git-without-payload-repo"
+fi
+rm -rf "$SPYDIR"
 
 # ── Branch resolution from .git/HEAD ──
 # These build real directories with synthetic .git entries, so they call
@@ -252,6 +289,15 @@ branch_case() {
   fi
 }
 
+branch_case_absent() {
+  local name="$1" dir="$2" pattern="$3"
+  if branch_out "$dir" | grep -qE "$pattern"; then
+    FAIL=$((FAIL+1)); FAILED_TESTS+=("$name (expected pattern absent: $pattern)"); echo "  FAIL: $name"
+  else
+    PASS=$((PASS+1)); echo "  PASS: $name"
+  fi
+}
+
 # Test 58: a normal repo reports its branch
 branch_case "58-branch-from-head" "$BRANCHTMP/normal" "feature/x"
 
@@ -267,8 +313,12 @@ branch_case "60-branch-through-gitdir-file" "$BRANCHTMP/wt" "worktree-branch"
 # Test 61: a subdirectory walks up to the repo root
 branch_case "61-branch-walks-up" "$BRANCHTMP/normal/src/deep" "feature/x"
 
-# Test 62: no .git anywhere renders without a branch and without crashing
-branch_case "62-no-git-still-renders" "$BRANCHTMP/bare" "Claude Opus"
+# Test 62: with no .git anywhere, row 3 still renders its repo but shows no
+# branch. Asserting on row 3 specifically: an earlier version of this test
+# grepped for the model name, which lives in row 1, so it passed no matter what
+# row 3 did — it could not detect the regression it is named for.
+branch_case "62-no-git-row3-still-renders" "$BRANCHTMP/bare" "o/n"
+branch_case_absent "62b-no-git-no-branch-glyph" "$BRANCHTMP/bare" "⎋"
 
 # ── Fix round 1: sanitization findings ──
 
@@ -330,6 +380,21 @@ else
   PASS=$((PASS+1)); echo "  PASS: 67-cached-fields-not-leaked"
 fi
 rm -rf "$CACHE_TMPDIR"
+
+# ── Deferred-findings cleanup ──
+
+# Test 68: a non-integer pr.number is rejected rather than rendered as "#3.5".
+# The previous guard was `typeof pr.number === 'number'`, which accepted it.
+run_test "68-pr-number-non-integer-rejected" "$FIXTURES/pr-number-35.json" "" "" "#3\\.5" "absent"
+run_test "68b-pr-number-non-integer-hides-badge" "$FIXTURES/pr-number-35.json" "" "" "🔀" "absent"
+
+# Test 69: a negative pr.number is rejected rather than rendered as "#-5".
+run_test "69-pr-number-negative-rejected" "$FIXTURES/pr-number-5.json" "" "" "#-5" "absent"
+run_test "69b-pr-number-negative-hides-badge" "$FIXTURES/pr-number-5.json" "" "" "🔀" "absent"
+
+# Test 70: a valid positive integer still renders, so the tighter guard did not
+# break the normal case.
+run_test "70-pr-number-valid-still-renders" "$FIXTURES/pr-open-approved.json" "" "" "#412" "present"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
