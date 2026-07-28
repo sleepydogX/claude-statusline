@@ -1,0 +1,8 @@
+{
+  "session_id": "test-session-001",
+  "model": { "display_name": "Claude Opus 4.7" },
+  "workspace": { "current_dir": "/tmp/test", "project_dir": "/tmp/test" },
+  "version": "2.1.220",
+  "output_style": { "name": "default" },
+  "pr": { "number": 3.5, "url": "https://github.com/o/n/pull/1", "review_state": "approved" }
+}
