@@ -585,7 +585,8 @@ process.stdin.on('end', () => {
         const pr = data.pr;
         // A PR number is a positive integer. `typeof === 'number'` alone would
         // also admit 3.5 and -5, rendering `#3.5` / `#-5`.
-        const number = pr && Number.isInteger(pr.number) && pr.number > 0 ? pr.number : null;
+        const number = pr && Number.isInteger(pr.number) && pr.number > 0 && pr.number <= Number.MAX_SAFE_INTEGER
+          ? pr.number : null;
         if (number != null) {
           const states = Object.assign(Object.create(null), {
             approved:          { symbol: '✓', color: '\x1b[32m' },

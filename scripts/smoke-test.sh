@@ -317,7 +317,7 @@ branch_case "61-branch-walks-up" "$BRANCHTMP/normal/src/deep" "feature/x"
 # branch. Asserting on row 3 specifically: an earlier version of this test
 # grepped for the model name, which lives in row 1, so it passed no matter what
 # row 3 did — it could not detect the regression it is named for.
-branch_case "62-no-git-row3-still-renders" "$BRANCHTMP/bare" "o/n"
+branch_case "62-no-git-row3-still-renders" "$BRANCHTMP/bare" "🐙"
 branch_case_absent "62b-no-git-no-branch-glyph" "$BRANCHTMP/bare" "⎋"
 
 # ── Fix round 1: sanitization findings ──
@@ -346,7 +346,7 @@ run_test "65-repo-owner-esc-no-host-not-leaked" "$FIXTURES/repo-owner-esc-no-hos
 # leak it into the row. git_worktree never passes through osc8 at all.
 run_test "66-worktree-esc-not-leaked" "$FIXTURES/worktree-esc.json" "" "" $'\x1b\\[31mHACKED' "absent"
 
-# ── Final review fix: cached gh_branch/gh_user/sb_project sanitization ──
+# ── Final review fix: cached gh_user/sb_project sanitization ──
 # These fields are populated by regex over `git`/`gh`/`supabase` subprocess
 # output and cached to a file in os.tmpdir(); build a poisoned cache entry
 # directly (bypassing the subprocesses) and confirm none of its escape
@@ -372,7 +372,7 @@ printf '{"session_id":"%s","model":{"display_name":"Claude Opus 4.7"},"workspace
 
 out67="$(env -i HOME=/tmp PATH="$PATH" TMPDIR="$CACHE_TMPDIR" bash "$RUNNER" "$POISON_FIXTURE" "" 2>/dev/null || true)"
 
-# Test 67: raw ESC bytes from a poisoned gh_branch/gh_user/sb_project cache
+# Test 67: raw ESC bytes from a poisoned gh_user/sb_project cache
 # entry must not leak into the rendered row.
 if echo "$out67" | grep -qE $'\x1b\\[3[123]mHACK'; then
   FAIL=$((FAIL+1)); FAILED_TESTS+=("67-cached-fields-not-leaked"); echo "  FAIL: 67-cached-fields-not-leaked"
