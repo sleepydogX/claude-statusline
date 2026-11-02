@@ -540,6 +540,43 @@ for spec in "COLUMNS=60:56" "COLUMNS=181:177" ":100" "COLUMNS=abc:100" "COLUMNS=
 done
 rm -rf "$FX_TMP"
 
+# ── Tmpdir caches refuse planted links ──
+LT="$(mktemp -d)"
+LT_TMP="$LT/tmp"; mkdir -p "$LT_TMP"
+LSESS="link-test"
+printf '{"session_id":"%s","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp","repo":{"host":"github.com","owner":"o","name":"r"}},"context_window":{"remaining_percentage":80}}' "$LSESS" > "$LT/payload.json"
+lt_check() {
+  if eval "$2"; then PASS=$((PASS+1)); echo "  PASS: $1"
+  else FAIL=$((FAIL+1)); FAILED_TESTS+=("$1"); echo "  FAIL: $1"; fi
+}
+
+# Test 92: a symlink at the context-bridge path is not written through.
+printf 'precious' > "$LT/victim-ctx"
+ln -s "$LT/victim-ctx" "$LT_TMP/claude-ctx-$LSESS.json"
+# Test 93: a symlink at the info-cache path is neither read nor written through,
+# even when its target holds a fresh, well-formed cache entry.
+printf '{"ts":%s000,"gh_repo":"","gh_user":"SYMUSER","sb_project":""}' "$(date +%s)" > "$LT/victim-info"
+ln -s "$LT/victim-info" "$LT_TMP/claude-info-$LSESS.json"
+VICTIM_INFO_BEFORE="$(cat "$LT/victim-info")"
+out_lt="$(env -i HOME=/tmp PATH="$PATH" TMPDIR="$LT_TMP" bash "$RUNNER" "$LT/payload.json" "" 2>/dev/null || true)"
+lt_check "92-bridge-symlink-not-followed" '[ "$(cat "$LT/victim-ctx")" = "precious" ]'
+lt_check "93-info-symlink-not-read" '! echo "$out_lt" | grep -q SYMUSER'
+lt_check "93b-info-symlink-not-written" '[ "$(cat "$LT/victim-info")" = "$VICTIM_INFO_BEFORE" ]'
+
+# Test 94: a hardlink at the bridge path is not truncated or overwritten.
+rm -f "$LT_TMP"/claude-*
+printf 'precious' > "$LT/victim-hard"
+ln "$LT/victim-hard" "$LT_TMP/claude-ctx-$LSESS.json"
+env -i HOME=/tmp PATH="$PATH" TMPDIR="$LT_TMP" bash "$RUNNER" "$LT/payload.json" "" >/dev/null 2>&1 || true
+lt_check "94-bridge-hardlink-not-written" '[ "$(cat "$LT/victim-hard")" = "precious" ]'
+
+# Test 95: with nothing planted, the bridge is still written, owner-only.
+rm -f "$LT_TMP"/claude-*
+env -i HOME=/tmp PATH="$PATH" TMPDIR="$LT_TMP" bash "$RUNNER" "$LT/payload.json" "" >/dev/null 2>&1 || true
+lt_check "95-bridge-written-normally" 'grep -q "\"remaining_percentage\":80" "$LT_TMP/claude-ctx-$LSESS.json"'
+lt_check "95b-bridge-owner-only" '[ "$(stat -f %Lp "$LT_TMP/claude-ctx-$LSESS.json" 2>/dev/null || stat -c %a "$LT_TMP/claude-ctx-$LSESS.json")" = "600" ]'
+rm -rf "$LT"
+
 # Test 91: every pictograph the script prints must default to emoji
 # presentation. Text-default ones (🏷 ⏱ ✍) get one width from Claude Code and
 # another from tmux, so partial redraws drop characters after them.

@@ -30,6 +30,36 @@ function osc8(url, text) {
   return `\x1b]8;;${url}\x07${safeText}\x1b]8;;\x07`;
 }
 
+// tmpdir may be a shared /tmp. Both helpers refuse a symlink (O_NOFOLLOW), a
+// FIFO (O_NONBLOCK, then the isFile check), a hardlink, or a file another user
+// owns, so a planted path can neither be written through nor feed us content.
+// Truncation happens only after those checks, never via O_TRUNC at open.
+const OWN_UID = typeof process.getuid === 'function' ? process.getuid() : null;
+function ownedRegular(st) {
+  return st.isFile() && st.nlink === 1 && (OWN_UID === null || st.uid === OWN_UID);
+}
+function readTmpFile(p) {
+  const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
+  const fd = fs.openSync(p, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+  try {
+    if (!ownedRegular(fs.fstatSync(fd))) throw new Error('untrusted tmp file');
+    return fs.readFileSync(fd, 'utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+function writeTmpFile(p, content) {
+  const { O_WRONLY, O_CREAT, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
+  const fd = fs.openSync(p, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0o600);
+  try {
+    if (!ownedRegular(fs.fstatSync(fd))) throw new Error('untrusted tmp file');
+    fs.ftruncateSync(fd, 0);
+    fs.writeSync(fd, content, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 // Resolve the git directory for startDir, walking up at most MAX_GIT_WALKUP
 // levels. A .git FILE rather than a directory means a worktree or submodule; it
 // holds a "gitdir: <path>" pointer, which may be relative to the file's own
@@ -136,7 +166,7 @@ process.stdin.on('end', () => {
       if (sessionSafe) {
         try {
           const bridgePath = path.join(os.tmpdir(), `claude-ctx-${session}.json`);
-          fs.writeFileSync(bridgePath, JSON.stringify({
+          writeTmpFile(bridgePath, JSON.stringify({
             session_id: session, remaining_percentage: remaining,
             used_pct: used, timestamp: Math.floor(Date.now() / 1000)
           }));
@@ -310,8 +340,12 @@ process.stdin.on('end', () => {
           const sessionSafe = session && !/[/\\]|\.\./.test(session);
           const slugCachePath = sessionSafe ? path.join(os.tmpdir(), `claude-slug-${session}`) : null;
           let slug = '';
-          if (slugCachePath && fs.existsSync(slugCachePath)) {
-            slug = fs.readFileSync(slugCachePath, 'utf8').trim();
+          let cachedSlug = null;
+          if (slugCachePath) {
+            try { cachedSlug = readTmpFile(slugCachePath).trim(); } catch (e) { /* absent or untrusted */ }
+          }
+          if (cachedSlug) {
+            slug = cachedSlug;
           } else {
             const stat = fs.statSync(transcriptPath);
             const readSize = Math.min(stat.size, 8192);
@@ -326,7 +360,7 @@ process.stdin.on('end', () => {
               if (lastMatch) slug = lastMatch[1];
             }
             if (slug && slugCachePath) {
-              try { fs.writeFileSync(slugCachePath, slug); } catch (e) {}
+              try { writeTmpFile(slugCachePath, slug); } catch (e) {}
             }
           }
           if (slug) {
@@ -553,9 +587,9 @@ process.stdin.on('end', () => {
         const CACHE_TTL_MS = 120000;
 
         let infoCache = null;
-        if (infoCachePath && fs.existsSync(infoCachePath)) {
+        if (infoCachePath) {
           try {
-            infoCache = JSON.parse(fs.readFileSync(infoCachePath, 'utf8'));
+            infoCache = JSON.parse(readTmpFile(infoCachePath));
             if (Date.now() - infoCache.ts > CACHE_TTL_MS) infoCache = null;
           } catch (e) { infoCache = null; }
         }
@@ -616,7 +650,7 @@ process.stdin.on('end', () => {
           }
 
           if (infoCachePath) {
-            try { fs.writeFileSync(infoCachePath, JSON.stringify(infoCache)); } catch (e) {}
+            try { writeTmpFile(infoCachePath, JSON.stringify(infoCache)); } catch (e) {}
           }
         }
 
