@@ -62,9 +62,15 @@ Claude Code writes beside the transcript, in `<session>/subagents/`:
   agent that inherits its model, or 1M once usage passes 200k.
 
 This layout is undocumented and may change between Claude Code releases; the
-row then disappears rather than breaking the status line. It refreshes when
-the status line does, so set `statusLine.refreshInterval` (seconds) in
-`settings.json` to keep it current while the session is idle.
+row then disappears rather than breaking the status line.
+
+### Refresh
+
+Claude Code reruns the status line on new messages and, with
+`statusLine.refreshInterval` (seconds) set, on a timer. Without the timer the
+cost, countdowns and subagents row freeze while the session is idle. The
+installer sets it to 10 on a fresh install, and adds it on upgrade when it is
+missing; a value you set yourself is kept.
 
 ### Row 3 — repository context
 
