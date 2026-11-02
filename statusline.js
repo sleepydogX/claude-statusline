@@ -116,13 +116,22 @@ process.stdin.on('end', () => {
     const session = data.session_id || '';
     const remaining = data.context_window?.remaining_percentage;
 
-    // ── Context window constants ──
-    const AUTO_COMPACT_BUFFER_PCT = 16.5;
+    // ── Context window ──
+    // Autocompact reserves a fixed token buffer, not a fixed share of the
+    // window: 33k is 16.5% of 200k but only 3.3% of 1M.
+    const AUTO_COMPACT_BUFFER_TOKENS = 33000;
+    const windowSize = Number(data.context_window?.context_window_size) > 0
+      ? Number(data.context_window.context_window_size)
+      : 200000;
+    const AUTO_COMPACT_BUFFER_PCT = Math.min(50, AUTO_COMPACT_BUFFER_TOKENS / windowSize * 100);
+    const usedPct = remaining == null ? null : (() => {
+      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
+      return Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
+    })();
 
     // Write context metrics bridge file (for context-monitor hooks)
     if (MODULES.context_bridge && remaining != null) {
-      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
-      const used = Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
+      const used = usedPct;
       const sessionSafe = session && !/[/\\]|\.\./.test(session);
       if (sessionSafe) {
         try {
@@ -244,26 +253,28 @@ process.stdin.on('end', () => {
       } catch (e) { /* silent */ }
     }
 
-    // ── Current task from todos ──
-    let task = '';
-    const homeDir = os.homedir();
-    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
-    const todosDir = path.join(claudeDir, 'todos');
-    if (session && fs.existsSync(todosDir)) {
-      try {
-        const files = fs.readdirSync(todosDir)
-          .filter(f => f.startsWith(session) && f.includes('-agent-') && f.endsWith('.json'))
-          .map(f => ({ name: f, mtime: fs.statSync(path.join(todosDir, f)).mtime }))
-          .sort((a, b) => b.mtime - a.mtime);
-        if (files.length > 0) {
+    // ── Stale cache cleanup ──
+    // Per-session files below accumulate in tmpdir forever. Sweep those older
+    // than a week, at most once a day, gated by a marker file's mtime.
+    try {
+      const tmp = os.tmpdir();
+      const marker = path.join(tmp, 'claude-statusline-gc');
+      const DAY_MS = 86400000;
+      let lastRun = 0;
+      try { lastRun = fs.statSync(marker).mtimeMs; } catch (e) {}
+      if (Date.now() - lastRun > DAY_MS) {
+        fs.writeFileSync(marker, '');
+        const cutoff = Date.now() - 7 * DAY_MS;
+        for (const f of fs.readdirSync(tmp)) {
+          if (!/^claude-(info-.+\.json|ctx-.+\.json|slug-.+)$/.test(f)) continue;
           try {
-            const todos = JSON.parse(fs.readFileSync(path.join(todosDir, files[0].name), 'utf8'));
-            const inProgress = todos.find(t => t.status === 'in_progress');
-            if (inProgress) task = inProgress.activeForm || '';
+            const p = path.join(tmp, f);
+            const st = fs.lstatSync(p);
+            if (st.isFile() && st.mtimeMs < cutoff) fs.unlinkSync(p);
           } catch (e) {}
         }
-      } catch (e) {}
-    }
+      }
+    } catch (e) { /* silent */ }
 
     // ── Session name ──
     // Prefer the native session_name field (a /rename or --name value, otherwise
@@ -353,23 +364,30 @@ process.stdin.on('end', () => {
           if (pct < 90) return `\x1b[38;5;208m${pct}%\x1b[0m`;
           return `\x1b[5;31m${pct}%\x1b[0m`;
         };
-        if (fiveHour) {
-          const pct = fiveHour.used_percentage || 0;
+        // The payload's percentage is only as fresh as the last API response,
+        // so once resets_at has passed it describes a window that is gone.
+        const windowState = (limit) => {
+          let pct = Math.round(Number(limit.used_percentage) || 0);
           let resetStr = '';
-          if (fiveHour.resets_at) {
-            const diffMs = fiveHour.resets_at * 1000 - Date.now();
-            if (diffMs > 0) {
-              const diffH = Math.floor(diffMs / 3600000);
-              const diffM = Math.floor((diffMs % 3600000) / 60000);
-              resetStr = ` \x1b[2m${diffH}h${String(diffM).padStart(2,'0')}m\x1b[0m`;
+          const resetsAt = Number(limit.resets_at);
+          if (resetsAt > 0) {
+            const diffMs = resetsAt * 1000 - Date.now();
+            if (diffMs <= 0) {
+              pct = 0;
+            } else {
+              const d = Math.floor(diffMs / 86400000);
+              const h = Math.floor((diffMs % 86400000) / 3600000);
+              const m = Math.floor((diffMs % 3600000) / 60000);
+              const text = d > 0
+                ? `${d}d${String(h).padStart(2,'0')}h`
+                : `${h}h${String(m).padStart(2,'0')}m`;
+              resetStr = ` \x1b[2m${text}\x1b[0m`;
             }
           }
-          parts.push(`\x1b[1;37m\u26A15h\x1b[0m ${colorPct(pct)}${resetStr}`);
-        }
-        if (sevenDay) {
-          const pct = sevenDay.used_percentage || 0;
-          parts.push(`\x1b[1;37m\u{1F4C5}7d\x1b[0m ${colorPct(pct)}`);
-        }
+          return `${colorPct(pct)}${resetStr}`;
+        };
+        if (fiveHour) parts.push(`\x1b[1;37m\u26A15h\x1b[0m ${windowState(fiveHour)}`);
+        if (sevenDay) parts.push(`\x1b[1;37m\u{1F4C5}7d\x1b[0m ${windowState(sevenDay)}`);
         rateLimitPart = parts.join(' \x1b[2m\u2502\x1b[0m ');
       }
     }
@@ -620,8 +638,7 @@ process.stdin.on('end', () => {
     // Context bar with label
     let ctxPart = '';
     if (remaining != null) {
-      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
-      const used = Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
+      const used = usedPct;
       const filled = Math.floor(used / 10);
       const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(10 - filled);
       const label = `CTX ${used}%`;
@@ -696,17 +713,10 @@ process.stdin.on('end', () => {
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, prPart, supabasePart].filter(Boolean);
 
-    // Task row
-    const taskRow = task ? `\x1b[1;38;5;220m\u2699 ${task}\x1b[0m` : '';
-
     // Compose
     const lines = [];
     lines.push(hr);
     lines.push(' ' + row1Cells.join(sep));
-    if (taskRow) {
-      lines.push(hr);
-      lines.push(' ' + taskRow);
-    }
     if (row2Cells.length > 0) {
       lines.push(hr);
       lines.push(' ' + row2Cells.join(sep));

@@ -441,6 +441,49 @@ run_test "76-subagents-absent-dir-no-row" "$NOSUB_FIXTURE" "" "" "🤖" "absent"
 run_test "76b-subagents-absent-dir-still-renders" "$NOSUB_FIXTURE" "" "" "Claude Opus" "present"
 rm -rf "$SUB_TMP"
 
+# ── Context %, rate-limit freshness, cache sweep ──
+FX_TMP="$(mktemp -d)"
+NOW=$(date +%s)
+ctx_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"context_window":{"context_window_size":%s,"remaining_percentage":50}}' "$1" > "$2"; }
+ctx_fixture 1000000 "$FX_TMP/ctx-1m.json"
+ctx_fixture 200000 "$FX_TMP/ctx-200k.json"
+
+# Test 77: on a 1M window the 33k buffer is 3.3%, so 50% remaining is 52% used
+# (the old fixed 16.5% buffer reported 60%).
+run_test "77-ctx-1m-buffer-in-tokens" "$FX_TMP/ctx-1m.json" "" "" "CTX 52%" "present"
+# Test 78: a 200k window keeps the previous behaviour.
+run_test "78-ctx-200k-unchanged" "$FX_TMP/ctx-200k.json" "" "" "CTX 60%" "present"
+
+rl_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%s},"seven_day":{"used_percentage":%s,"resets_at":%s}}}' "$1" "$2" "$3" "$4" > "$5"; }
+rl_fixture 90 $((NOW - 60)) 30 $((NOW + 3*86400 + 4*3600 + 120)) "$FX_TMP/rl.json"
+# Test 79: a 5h window whose reset already passed shows 0%, not the stale 90%.
+run_test "79-5h-past-reset-shows-zero" "$FX_TMP/rl.json" "" "" "5h.*0%" "present"
+run_test "79b-5h-past-reset-hides-stale" "$FX_TMP/rl.json" "" "" "90%" "absent"
+# Test 80: the 7-day window now shows its countdown, in days once past 24h.
+run_test "80-7d-shows-reset-in-days" "$FX_TMP/rl.json" "" "" "7d.*30%.*3d04h" "present"
+
+# Test 81: the sweep deletes our week-old per-session files only.
+GC_TMP="$FX_TMP/gc"; mkdir -p "$GC_TMP"
+OLD_STAMP="$(date -v-8d +%Y%m%d%H%M.%S 2>/dev/null || date -d '-8 days' +%Y%m%d%H%M.%S)"
+for f in claude-info-old.json claude-ctx-old.json claude-slug-old unrelated-old.json; do : > "$GC_TMP/$f"; touch -t "$OLD_STAMP" "$GC_TMP/$f"; done
+: > "$GC_TMP/claude-info-fresh.json"
+env -i HOME=/tmp PATH="$PATH" TMPDIR="$GC_TMP" bash "$RUNNER" "$FIXTURES/minimal.json" "" >/dev/null 2>&1 || true
+gc_check() {
+  local ok=false
+  if [ "$2" = "gone" ]; then [ ! -e "$GC_TMP/$1" ] && ok=true; else [ -e "$GC_TMP/$1" ] && ok=true; fi
+  if $ok; then
+    PASS=$((PASS+1)); echo "  PASS: 81-gc-$1-$2"
+  else
+    FAIL=$((FAIL+1)); FAILED_TESTS+=("81-gc-$1-$2"); echo "  FAIL: 81-gc-$1-$2"
+  fi
+}
+gc_check claude-info-old.json gone
+gc_check claude-ctx-old.json gone
+gc_check claude-slug-old gone
+gc_check claude-info-fresh.json kept
+gc_check unrelated-old.json kept
+rm -rf "$FX_TMP"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

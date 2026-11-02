@@ -6,7 +6,7 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  ⬡ Opus 4.6 (1M context) v2.1.98 │ 📂 ~/projects/my-app │ +90 -17 │ ░░░░░░░░░░ CTX 8%
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- 🧠 HIGH │ ✍ style: explanatory │ ⚡ FAST │ 🏷 Tender Discovering Forest │ 💰 $1.84 │ ⏱ 23m15s │ ⚡5h 16% 3h40m │ 📅7d 17%
+ 🧠 HIGH │ ✍ style: explanatory │ ⚡ FAST │ 🏷 Tender Discovering Forest │ 💰 $1.84 │ ⏱ 23m15s │ ⚡5h 16% 3h40m │ 📅7d 17% 4d06h
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  🐙 JawaSec/secops-portal ⎋ dev/kenneth 🌳 fix-auth @jawkgonzalez │ 🔀 #412 ✓
 ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 | **Session Name** | Auto-generated session slug |
 | **Cost** | Projected API cost in USD |
 | **Duration** | Session elapsed time |
-| **Rate Limits** | 5-hour and 7-day usage with time until reset |
+| **Rate Limits** | 5-hour and 7-day usage with time until reset; a window whose reset has passed shows 0% |
 | **Subagents** | Count of subagents currently working, with each one's context usage |
 | **GitHub** | Repository, branch, and active account |
 | **Supabase** | Linked project name |
@@ -101,6 +101,10 @@ Links use OSC 8 escape sequences, clickable in iTerm2, Kitty and WezTerm. Other
 terminals show the text and ignore the sequence.
 
 ### Context Window Colors
+
+`CTX` is the share of the window used before autocompact, which reserves a
+fixed ~33k-token buffer: 16.5% of a 200k window, 3.3% of a 1M one. The window
+size comes from the payload's `context_window.context_window_size`.
 
 | Color | Usage | Meaning |
 |-------|-------|---------|
