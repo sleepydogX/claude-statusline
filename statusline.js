@@ -261,9 +261,19 @@ process.stdin.on('end', () => {
       const marker = path.join(tmp, 'claude-statusline-gc');
       const DAY_MS = 86400000;
       let lastRun = 0;
-      try { lastRun = fs.statSync(marker).mtimeMs; } catch (e) {}
+      try { lastRun = fs.lstatSync(marker).mtimeMs; } catch (e) {}
       if (Date.now() - lastRun > DAY_MS) {
-        fs.writeFileSync(marker, '');
+        // tmpdir may be a shared /tmp: O_NOFOLLOW refuses a planted symlink
+        // (throwing, which skips the sweep), and bumping mtime instead of
+        // writing means nothing is ever truncated.
+        const { O_WRONLY, O_CREAT, O_NOFOLLOW } = fs.constants;
+        const fd = fs.openSync(marker, O_WRONLY | O_CREAT | O_NOFOLLOW, 0o600);
+        try {
+          const now = new Date();
+          fs.futimesSync(fd, now, now);
+        } finally {
+          fs.closeSync(fd);
+        }
         const cutoff = Date.now() - 7 * DAY_MS;
         for (const f of fs.readdirSync(tmp)) {
           if (!/^claude-(info-.+\.json|ctx-.+\.json|slug-.+)$/.test(f)) continue;

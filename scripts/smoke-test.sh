@@ -482,6 +482,21 @@ gc_check claude-ctx-old.json gone
 gc_check claude-slug-old gone
 gc_check claude-info-fresh.json kept
 gc_check unrelated-old.json kept
+
+# Test 82: a symlink planted at the marker path is not followed, so its
+# target keeps its content, and the sweep is skipped.
+LINK_TMP="$FX_TMP/link"; mkdir -p "$LINK_TMP"
+printf 'precious' > "$FX_TMP/victim.txt"
+# Old mtime, so a marker check that follows the link would see the sweep as due.
+touch -t "$OLD_STAMP" "$FX_TMP/victim.txt"
+ln -s "$FX_TMP/victim.txt" "$LINK_TMP/claude-statusline-gc"
+: > "$LINK_TMP/claude-info-old.json"; touch -t "$OLD_STAMP" "$LINK_TMP/claude-info-old.json"
+env -i HOME=/tmp PATH="$PATH" TMPDIR="$LINK_TMP" bash "$RUNNER" "$FIXTURES/minimal.json" "" >/dev/null 2>&1 || true
+if [ "$(cat "$FX_TMP/victim.txt")" = "precious" ] && [ -e "$LINK_TMP/claude-info-old.json" ]; then
+  PASS=$((PASS+1)); echo "  PASS: 82-gc-marker-symlink-not-followed"
+else
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("82-gc-marker-symlink-not-followed"); echo "  FAIL: 82-gc-marker-symlink-not-followed"
+fi
 rm -rf "$FX_TMP"
 
 echo ""
