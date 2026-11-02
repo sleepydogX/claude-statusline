@@ -202,6 +202,8 @@ Two equivalent ways to update after a `git pull`:
 
 **From Claude Code:** run `/statusline-update`. The slash command pulls the repo and runs the installer for you.
 
+**What does each icon mean?** Run `/statusline-legend` for a table of every icon and value in the status line.
+
 After updating, restart your Claude Code session to see the new statusline.
 
 ## Uninstall

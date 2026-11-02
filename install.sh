@@ -205,6 +205,8 @@ COMMANDS_DIR="$CLAUDE_DIR/commands"
 mkdir -p "$COMMANDS_DIR"
 sed "s|__REPO_PATH__|$SCRIPT_DIR|g" "$SCRIPT_DIR/commands/statusline-update.md" > "$COMMANDS_DIR/statusline-update.md"
 echo -e "${GREEN}  Slash command installed: /statusline-update${RESET}"
+cp "$SCRIPT_DIR/commands/statusline-legend.md" "$COMMANDS_DIR/statusline-legend.md"
+echo -e "${GREEN}  Slash command installed: /statusline-legend${RESET}"
 
 # Wire statusLine into settings.json (unless scope = skip or upgrade mode)
 if [ "$UPGRADE_MODE" = false ] && [ -n "$SETTINGS_TARGET" ]; then
