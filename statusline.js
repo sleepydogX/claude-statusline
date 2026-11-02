@@ -233,7 +233,7 @@ process.stdin.on('end', () => {
           name = raw.name;
         }
         if (name && name !== 'default') {
-          outputStylePart = `\x1b[36m\u270D style: ${name}\x1b[0m`;
+          outputStylePart = `\x1b[36m\u{1F4DD} style: ${name}\x1b[0m`;
         }
       } catch (e) { /* silent */ }
     }
@@ -298,7 +298,7 @@ process.stdin.on('end', () => {
       const shown = clean.length > MAX_SESSION_NAME
         ? clean.slice(0, MAX_SESSION_NAME - 1) + '…'
         : clean;
-      return `\x1b[1;38;5;213m\u{1F3F7} ${shown}\x1b[0m`;
+      return `\x1b[1;38;5;213m\u{1F516} ${shown}\x1b[0m`;
     };
     if (MODULES.session_name && typeof data.session_name === 'string') {
       sessionNamePart = renderSessionName(data.session_name);
@@ -347,7 +347,7 @@ process.stdin.on('end', () => {
         const m = Math.floor((elapsed % 3600) / 60);
         const s = elapsed % 60;
         const timeStr = h > 0 ? `${h}h${String(m).padStart(2,'0')}m` : `${m}m${String(s).padStart(2,'0')}s`;
-        durationPart = `\x1b[1;35m\u23F1 ${timeStr}\x1b[0m`;
+        durationPart = `\x1b[1;35m\u231B ${timeStr}\x1b[0m`;
       }
     }
 

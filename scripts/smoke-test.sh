@@ -123,7 +123,7 @@ run_test "35-payload-fastmode-on" "$FIXTURES/payload-fastmode-on.json" "" "" $'\
 run_test "36-payload-fastmode-off-beats-settings" "$FIXTURES/payload-fastmode-off.json" "$FIXTURES/settings-fastmode.json" "" "FAST" "absent"
 
 # Test 37: native session_name renders without title-casing it
-run_test "37-payload-session-name" "$FIXTURES/payload-session-name.json" "" "" "🏷 refactor payload sources" "present"
+run_test "37-payload-session-name" "$FIXTURES/payload-session-name.json" "" "" "🔖 refactor payload sources" "present"
 
 # Test 38: an overlong session_name is truncated with an ellipsis
 run_test "38-session-name-truncated" "$FIXTURES/payload-session-name-long.json" "" "" "…" "present"
@@ -539,6 +539,19 @@ for spec in "COLUMNS=60:56" "COLUMNS=181:177" ":100" "COLUMNS=abc:100" "COLUMNS=
   else FAIL=$((FAIL+1)); FAILED_TESTS+=("90-rule-width ${envkv:-unset} (want $want, got $got)"); echo "  FAIL: 90-rule-width ${envkv:-unset}"; fi
 done
 rm -rf "$FX_TMP"
+
+# Test 91: every pictograph the script prints must default to emoji
+# presentation. Text-default ones (🏷 ⏱ ✍) get one width from Claude Code and
+# another from tmux, so partial redraws drop characters after them.
+AMBIG="$(node -e '
+const src = require("fs").readFileSync(process.argv[1], "utf8")
+  .replace(/\\u\{([0-9A-Fa-f]+)\}|\\u([0-9A-Fa-f]{4})/g, (_, a, b) => String.fromCodePoint(parseInt(a || b, 16)));
+const bad = new Set();
+for (const ch of src) if (/\p{Extended_Pictographic}/u.test(ch) && !/\p{Emoji_Presentation}/u.test(ch)) bad.add(ch);
+process.stdout.write([...bad].join(" "));
+' "$REPO_DIR/statusline.js")"
+if [ -z "$AMBIG" ]; then PASS=$((PASS+1)); echo "  PASS: 91-no-ambiguous-width-emoji"
+else FAIL=$((FAIL+1)); FAILED_TESTS+=("91-no-ambiguous-width-emoji (found: $AMBIG)"); echo "  FAIL: 91-no-ambiguous-width-emoji"; fi
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

@@ -87,14 +87,14 @@ if [ "$UPGRADE_MODE" = false ]; then
     fi
   }
 
-  mod_session_name=$(ask_module "session_name" "Session name (random slug identifier)" "y" "🏷 ")
+  mod_session_name=$(ask_module "session_name" "Session name (random slug identifier)" "y" "🔖 ")
   mod_cost=$(ask_module "cost" "Projected cost in USD" "y" "💰")
-  mod_duration=$(ask_module "duration" "Session duration timer" "y" "⏱ ")
+  mod_duration=$(ask_module "duration" "Session duration timer" "y" "⌛ ")
   mod_rate_limits=$(ask_module "rate_limits" "Rate limits (5h + 7d usage)" "y" "⚡")
   mod_lines_changed=$(ask_module "lines_changed" "Lines added/removed" "y" "📊")
   mod_context_bridge=$(ask_module "context_bridge" "Context metrics bridge (for other hooks)" "y" "🔗")
   mod_effort=$(ask_module "effort" "Reasoning effort (/effort level)" "y" "🧠")
-  mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "✍ ")
+  mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "📝 ")
   mod_fast_mode=$(ask_module "fast_mode" "Fast mode indicator" "y" "⚡")
   mod_pr=$(ask_module "pr" "Open pull request badge" "y" "🔀")
   mod_subagents=$(ask_module "subagents" "Running subagents + context usage" "y" "🤖")

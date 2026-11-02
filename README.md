@@ -6,7 +6,7 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  ⬡ Opus 4.6 (1M context) v2.1.98 │ 📂 ~/projects/my-app │ +90 -17 │ ░░░░░░░░░░ CTX 8%
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- 🧠 HIGH │ ✍ style: explanatory │ ⚡ FAST │ 🏷 Tender Discovering Forest │ 💰 $1.84 ($4.7/h) │ ⏱ 23m15s │ ⚡5h 16% ⇣10% 3h40m │ 📅7d 17% ⇣22% 4d06h
+ 🧠 HIGH │ 📝 style: explanatory │ ⚡ FAST │ 🔖 Tender Discovering Forest │ 💰 $1.84 ($4.7/h) │ ⌛ 23m15s │ ⚡5h 16% ⇣10% 3h40m │ 📅7d 17% ⇣22% 4d06h
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  🐙 JawaSec/secops-portal ⎋ dev/kenneth 🌳 fix-auth @jawkgonzalez │ 🔀 #412 ✓
 ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -34,12 +34,12 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 | Segment | Visible when | Shows |
 |---|---|---|
 | 🧠 effort | always | Current reasoning effort (`auto`/`low`/`medium`/`high`/`xhigh`/`max`), read from the payload's `effort.level` so it tracks mid-session `/effort` changes. Falls back to `~/.claude/settings.json.effortLevel` and `CLAUDE_CODE_EFFORT_LEVEL` (appends `*`) when the payload omits the field. |
-| ✍ output_style | value ≠ `default` | Active output style name, prefixed with `style:` (e.g. `style: explanatory`, set via `/output-style`). |
+| 📝 output_style | value ≠ `default` | Active output style name, prefixed with `style:` (e.g. `style: explanatory`, set via `/output-style`). |
 | ⚡ fast_mode | `true` | Claude Code fast mode is on, read from the payload's `fast_mode` (toggled by `/fast`). |
 
 All three can be disabled individually in `~/.claude/statusline-config.json`.
 
-The 🏷 session name comes from the payload's `session_name` — a `/rename` or `--name` value, otherwise the AI-generated title — and falls back to the transcript slug when neither exists.
+The 🔖 session name comes from the payload's `session_name` — a `/rename` or `--name` value, otherwise the AI-generated title — and falls back to the transcript slug when neither exists.
 
 > **Removed in the payload-field cleanup:** the `permission_mode` and `mcp_health` segments read `permissionMode` and `mcp_servers`, which Claude Code does not send to status line commands, so they never rendered. Claude Code already shows the permission mode in its own footer and surfaces MCP errors beside the status line. Upgrading drops both toggles from your config automatically.
 
@@ -147,14 +147,14 @@ The interactive installer will guide you through module selection:
 
   Select which modules to enable:
 
-  🏷  Session name (random slug identifier) (Y/n):
+  🔖  Session name (random slug identifier) (Y/n):
   💰 Projected cost in USD (Y/n):
-  ⏱  Session duration timer (Y/n):
+  ⌛  Session duration timer (Y/n):
   ⚡ Rate limits (5h + 7d usage) (Y/n):
   📊 Lines added/removed (Y/n):
   🔗 Context metrics bridge (for other hooks) (Y/n):
   🧠 Reasoning effort (/effort level) (Y/n):
-  ✍  Output style (/output-style) (Y/n):
+  📝  Output style (/output-style) (Y/n):
   ⚡ Fast mode indicator (Y/n):
   🔀 Open pull request badge (Y/n):
 
