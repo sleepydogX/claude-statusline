@@ -577,6 +577,34 @@ lt_check "95-bridge-written-normally" 'grep -q "\"remaining_percentage\":80" "$L
 lt_check "95b-bridge-owner-only" '[ "$(stat -f %Lp "$LT_TMP/claude-ctx-$LSESS.json" 2>/dev/null || stat -c %a "$LT_TMP/claude-ctx-$LSESS.json")" = "600" ]'
 rm -rf "$LT"
 
+# ── Prompt cache ──
+# Shapes taken from a live Claude Code 2.1.316 payload: expires_at in unix
+# seconds, hit_ratio 0–1.
+PC="$(mktemp -d)"
+NOWS=$(date +%s)
+pc_fixture() { printf '{"session_id":"pc","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"prompt_cache":%s}' "$1" > "$2"; }
+pc_fixture "{\"warm\":true,\"caching_observed\":true,\"ttl\":\"1h\",\"expires_at\":$((NOWS + 2530)),\"hit_ratio\":0.9818,\"recache_tokens_if_cold\":233514}" "$PC/warm.json"
+pc_fixture "{\"warm\":true,\"caching_observed\":true,\"ttl\":\"1h\",\"expires_at\":$((NOWS + 45)),\"hit_ratio\":0.5}" "$PC/expiring.json"
+pc_fixture "{\"warm\":false,\"caching_observed\":true,\"ttl\":\"1h\",\"expires_at\":$((NOWS - 600)),\"hit_ratio\":0.928,\"recache_tokens_if_cold\":133983}" "$PC/cold.json"
+pc_fixture "{\"warm\":true,\"caching_observed\":true,\"ttl\":\"1h\",\"expires_at\":$((NOWS - 5)),\"hit_ratio\":0.9}" "$PC/stale-warm.json"
+pc_fixture "{\"warm\":false,\"caching_observed\":false,\"expires_at\":null,\"hit_ratio\":null}" "$PC/unobserved.json"
+pc_fixture "{\"warm\":true,\"caching_observed\":true,\"expires_at\":\"soon\",\"hit_ratio\":\"\\u001b[31mX\"}" "$PC/malformed.json"
+
+# Test 96: warm cache shows minutes left (42m) and the hit ratio (98%).
+run_test "96-pc-warm-countdown-and-ratio" "$PC/warm.json" "" "" "🧊 42m.*98%" "present"
+# Test 97: under two minutes left it turns red and shows seconds.
+run_test "97-pc-expiring-red-seconds" "$PC/expiring.json" "" "" $'\x1b\\[31m🧊 4[0-9]s' "present"
+# Test 98: a cold cache says so and how many tokens the next message rewrites.
+run_test "98-pc-cold-with-rewrite-cost" "$PC/cold.json" "" "" "🧊 cold.*134k to rewrite.*93%" "present"
+# Test 99: warm=true but already past expires_at is treated as cold.
+run_test "99-pc-past-expiry-is-cold" "$PC/stale-warm.json" "" "" "🧊 cold" "present"
+# Test 100: nothing until caching has been observed.
+run_test "100-pc-hidden-until-observed" "$PC/unobserved.json" "" "" "🧊" "absent"
+# Test 101: non-numeric fields render no ratio and inject nothing.
+run_test "101-pc-malformed-no-injection" "$PC/malformed.json" "" "" $'\x1b\\[31mX' "absent"
+run_test "101b-pc-malformed-no-ratio" "$PC/malformed.json" "" "" "🧊 cold"$'\x1b\\[0m'"$" "present"
+rm -rf "$PC"
+
 # Test 91: every pictograph the script prints must default to emoji
 # presentation. Text-default ones (🏷 ⏱ ✍) get one width from Claude Code and
 # another from tmux, so partial redraws drop characters after them.

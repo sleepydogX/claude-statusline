@@ -121,6 +121,7 @@ const MODULES = {
   fast_mode: true,       // Fast mode indicator (added in T5)
   pr: true,              // Open pull request for the current branch
   subagents: true,       // Running subagents and their context usage
+  prompt_cache: true,    // Prompt cache time-to-expiry and hit ratio
 };
 
 // Load user overrides from config file if present
@@ -400,6 +401,39 @@ process.stdin.on('end', () => {
         }
         costPart = `\x1b[1;33m\u{1F4B0} ${costStr}\x1b[0m${rateStr}`;
       }
+    }
+
+    // ── Prompt cache ──
+    // Time left before the cached prefix expires (replying sooner reuses it at a
+    // fraction of the price) and the session's hit ratio. expires_at is unix
+    // seconds and hit_ratio is 0–1. Hidden until caching has been observed.
+    let promptCachePart = '';
+    if (MODULES.prompt_cache) {
+      try {
+        const pc = data.prompt_cache;
+        if (pc && pc.caching_observed === true) {
+          const ratio = Number(pc.hit_ratio);
+          const hitStr = Number.isFinite(ratio) && ratio >= 0 && ratio <= 1
+            ? ` \x1b[2m${Math.round(ratio * 100)}%\x1b[0m`
+            : '';
+          const leftMs = Number(pc.expires_at) * 1000 - Date.now();
+          if (pc.warm === true && leftMs > 0) {
+            const s = Math.floor(leftMs / 1000);
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const text = h > 0 ? `${h}h${String(m).padStart(2, '0')}m` : m > 0 ? `${m}m` : `${s}s`;
+            const color = s < 120 ? '\x1b[31m' : s < 600 ? '\x1b[33m' : '\x1b[36m';
+            promptCachePart = `${color}\u{1F9CA} ${text}\x1b[0m${hitStr}`;
+          } else {
+            // Cold: the next message rewrites the whole prefix at full price.
+            const tokens = Number(pc.recache_tokens_if_cold);
+            const cost = tokens > 0
+              ? ` \x1b[2m(${tokens >= 1000 ? Math.round(tokens / 1000) + 'k' : Math.round(tokens)} to rewrite)\x1b[0m`
+              : '';
+            promptCachePart = `\x1b[2;37m\u{1F9CA} cold\x1b[0m${cost}${hitStr}`;
+          }
+        }
+      } catch (e) { /* silent */ }
     }
 
     // ── Rate limits ──
@@ -765,7 +799,7 @@ process.stdin.on('end', () => {
     ].filter(Boolean);
 
     // ROW 2: Effort + Output Style + Fast Mode + Session + Cost + Duration + Rate Limits
-    const row2Cells = [effortPart, outputStylePart, fastModePart, sessionNamePart, costPart, durationPart, rateLimitPart].filter(Boolean);
+    const row2Cells = [effortPart, outputStylePart, fastModePart, sessionNamePart, costPart, promptCachePart, durationPart, rateLimitPart].filter(Boolean);
 
     // ── Pull request ──
     // data.pr is present only while an open PR exists for the branch; it

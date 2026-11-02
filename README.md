@@ -6,7 +6,7 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  ⬡ Opus 4.6 (1M context) v2.1.98 │ 📂 ~/projects/my-app │ +90 -17 │ ░░░░░░░░░░ CTX 8%
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- 🧠 HIGH │ 📝 style: explanatory │ ⚡ FAST │ 🔖 Tender Discovering Forest │ 💰 $1.84 ($4.7/h) │ ⌛ 23m15s │ ⚡5h 16% ⇣10% 3h40m │ 📅7d 17% ⇣22% 4d06h
+ 🧠 HIGH │ 📝 style: explanatory │ ⚡ FAST │ 🔖 Tender Discovering Forest │ 💰 $1.84 ($4.7/h) │ 🧊 42m 98% │ ⌛ 23m15s │ ⚡5h 16% ⇣10% 3h40m │ 📅7d 17% ⇣22% 4d06h
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  🐙 JawaSec/secops-portal ⎋ dev/kenneth 🌳 fix-auth @jawkgonzalez │ 🔀 #412 ✓
 ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -25,6 +25,7 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 | **Duration** | Session elapsed time |
 | **Rate Limits** | 5-hour and 7-day usage with time until reset; a window whose reset has passed shows 0% |
 | **Pace** | `⇡8%` ahead of / `⇣8%` behind the clock for each window, once 5% of it has elapsed; `→ limit 15:40` when the current rate runs out before the reset |
+| **Prompt cache** | `🧊 42m 98%`: time left before the cached conversation expires, so replying sooner reuses it at a fraction of the price, plus the hit ratio. Yellow under 10 minutes, red under 2. `🧊 cold (234k to rewrite)` once it has expired. Read from the payload's `prompt_cache`; hidden until caching is observed |
 | **Subagents** | Count of subagents currently working, with each one's context usage |
 | **GitHub** | Repository, branch, and active account |
 | **Supabase** | Linked project name |
