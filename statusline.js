@@ -11,8 +11,11 @@ const os = require('os');
 // Used for every row-3 field sourced from the payload, a cache file, or a
 // subprocess's output (gh/supabase/git) — none of which are trusted to be
 // free of escape sequences.
+// C1 is included because some terminals treat \x9b as a one-byte CSI; bidi and
+// format characters are included because they can visually reorder the row.
+const CONTROL_RE = /[\x00-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]/g;
 function stripControl(s) {
-  return String(s).replace(/[\x00-\x1f\x7f]/g, '');
+  return String(s).replace(CONTROL_RE, '');
 }
 
 // Wrap text in an OSC 8 hyperlink. Only http(s) URLs free of control characters
@@ -21,9 +24,9 @@ function stripControl(s) {
 // the visible text can inject escape sequences into the row.
 // Terminals without OSC 8 support ignore the sequence and show the text.
 function osc8(url, text) {
-  const safeText = String(text).replace(/[\x00-\x1f\x7f]/g, '');
+  const safeText = stripControl(text);
   if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return safeText;
-  if (/[\x00-\x1f\x7f]/.test(url)) return safeText;
+  if (stripControl(url) !== url) return safeText;
   return `\x1b]8;;${url}\x07${safeText}\x1b]8;;\x07`;
 }
 
@@ -63,7 +66,7 @@ function readBranch(startDir) {
     const ref = head.match(/^ref:\s*refs\/heads\/(.+)$/);
     if (ref) {
       const name = ref[1].trim();
-      const safe = name.replace(/[\x00-\x1f\x7f]/g, '');
+      const safe = stripControl(name);
       return safe === name ? safe : '';
     }
     if (/^[0-9a-f]{7,40}$/i.test(head)) return head.slice(0, 7);

@@ -418,16 +418,21 @@ touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1 hour' +%Y%m%d%H
 # running, name carries an escape sequence -> stripped
 printf '{"name":"evil\\u001b[31mRED","agentType":"general-purpose","model":"haiku"}' > "$SUB_DIR/agent-ddd.meta.json"
 usage_line 1 20000 0 > "$SUB_DIR/agent-ddd.jsonl"
+# running, name carries a C1 CSI (U+009B) and a bidi override (U+202E) -> stripped
+printf '{"name":"c1\\u009b32mGREEN\\u202eflip","agentType":"general-purpose","model":"haiku"}' > "$SUB_DIR/agent-eee.meta.json"
+usage_line 1 20000 0 > "$SUB_DIR/agent-eee.jsonl"
 
 SUB_FIXTURE="$SUB_TMP/payload.json"
 printf '{"session_id":"sub-test","transcript_path":"%s","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"context_window_size":200000,"remaining_percentage":90}}' "$SUB_TMP/sess.jsonl" > "$SUB_FIXTURE"
 
-run_test "71-subagents-count-active-only" "$SUB_FIXTURE" "" "" "🤖 2 active" "present"
+run_test "71-subagents-count-active-only" "$SUB_FIXTURE" "" "" "🤖 3 active" "present"
 run_test "72-subagents-pct-from-last-usage" "$SUB_FIXTURE" "" "" "research.*█████░░░░░ 50%" "present"
 run_test "73-subagents-finished-hidden" "$SUB_FIXTURE" "" "" "doneagent" "absent"
 run_test "74-subagents-stale-hidden" "$SUB_FIXTURE" "" "" "staleagent" "absent"
 run_test "75-subagents-name-escape-stripped" "$SUB_FIXTURE" "" "" $'\x1b\\[31mRED' "absent"
 run_test "75b-subagents-name-still-shown" "$SUB_FIXTURE" "" "" "evil\\[31mRED" "present"
+run_test "75c-subagents-c1-and-bidi-stripped" "$SUB_FIXTURE" "" "" $'\xc2\x9b|\xe2\x80\xae' "absent"
+run_test "75d-subagents-c1-name-still-shown" "$SUB_FIXTURE" "" "" "c132mGREENflip" "present"
 
 # no subagents dir -> no row, and nothing else breaks
 NOSUB_FIXTURE="$SUB_TMP/payload-nosub.json"
