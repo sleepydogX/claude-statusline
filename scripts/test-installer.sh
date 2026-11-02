@@ -69,6 +69,7 @@ CMD_FILE="$SANDBOX/.claude/commands/statusline-update.md"
 [ -f "$CMD_FILE" ] || { echo "FAIL: slash command not installed"; exit 1; }
 grep -q "$REPO_DIR" "$CMD_FILE" || { echo "FAIL: repo path not substituted in slash command"; exit 1; }
 grep -q '__REPO_PATH__' "$CMD_FILE" && { echo "FAIL: template placeholder still present"; exit 1; }
+cmp -s "$REPO_DIR/commands/statusline-legend.md" "$SANDBOX/.claude/commands/statusline-legend.md" || { echo "FAIL: /statusline-legend not installed"; exit 1; }
 
 # Upgrading a pre-cleanup config must drop the stale toggles and keep the rest
 cat > "$CONFIG" <<'OLDCONFIG'
@@ -100,7 +101,7 @@ HOME="$SANDBOX" bash "$REPO_DIR/install.sh" <<< "y
 [ "$(refresh_of)" = "3" ] || { echo "FAIL: upgrade overwrote the user's refreshInterval"; exit 1; }
 
 echo "PASS: upgrade adds a missing refreshInterval and keeps a user-set one"
-echo "PASS: slash command installed with correct repo path"
+echo "PASS: slash commands installed (/statusline-update with repo path, /statusline-legend)"
 echo "PASS: idempotent upgrade"
 echo "PASS: installer writes settings.json and all new module flags"
 echo "PASS: upgrade prunes removed toggles and preserves user values"
