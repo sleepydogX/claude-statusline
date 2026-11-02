@@ -497,6 +497,47 @@ if [ "$(cat "$FX_TMP/victim.txt")" = "precious" ] && [ -e "$LINK_TMP/claude-info
 else
   FAIL=$((FAIL+1)); FAILED_TESTS+=("82-gc-marker-symlink-not-followed"); echo "  FAIL: 82-gc-marker-symlink-not-followed"
 fi
+
+# ── Pace, limit ETA, cost rate, rule width ──
+five_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%s}}}' "$1" "$2" > "$3"; }
+# half the 5h window gone (2.5h left)
+five_fixture 70 $((NOW + 9000)) "$FX_TMP/pace-ahead.json"
+five_fixture 20 $((NOW + 9000)) "$FX_TMP/pace-behind.json"
+# 4h55m left: only 1.7% of the window elapsed
+five_fixture 30 $((NOW + 17700)) "$FX_TMP/pace-early.json"
+
+# Test 83: 70% used at 50% elapsed is 20 points ahead, in red.
+run_test "83-pace-ahead" "$FX_TMP/pace-ahead.json" "" "" $'\x1b\\[31m⇡20%' "present"
+# Test 84: at that rate the window runs out (~1h04m) before the reset (2.5h).
+run_test "84-eta-shown-when-limit-before-reset" "$FX_TMP/pace-ahead.json" "" "" "→ limit [0-9]{2}:[0-9]{2}" "present"
+# Test 85: 20% at 50% elapsed is 30 points behind; no ETA since it lasts.
+run_test "85-pace-behind" "$FX_TMP/pace-behind.json" "" "" "⇣30%" "present"
+run_test "85b-no-eta-when-it-lasts" "$FX_TMP/pace-behind.json" "" "" "→ limit" "absent"
+# Test 86: too early in the window to judge pace.
+run_test "86-no-pace-early-in-window" "$FX_TMP/pace-early.json" "" "" "⇡|⇣" "absent"
+
+# Test 87: 7d at 80% with half the week gone runs out in ~21h: weekday shown.
+printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"rate_limits":{"seven_day":{"used_percentage":80,"resets_at":%s}}}' $((NOW + 302400)) > "$FX_TMP/eta-7d.json"
+run_test "87-eta-7d-has-weekday" "$FX_TMP/eta-7d.json" "" "" "→ limit (Sun|Mon|Tue|Wed|Thu|Fri|Sat) [0-9]{2}:[0-9]{2}" "present"
+
+cost_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":%s,"total_duration_ms":%s}}' "$1" "$2" > "$3"; }
+cost_fixture 2.0 1800000 "$FX_TMP/cost-30m.json"
+cost_fixture 0.5 120000 "$FX_TMP/cost-2m.json"
+# Test 88: $2 over 30 minutes is $4.0/h.
+run_test "88-cost-per-hour" "$FX_TMP/cost-30m.json" "" "" "\\\$2\\.00.*\\(\\\$4\\.0/h\\)" "present"
+# Test 89: under five minutes the rate is hidden.
+run_test "89-cost-rate-hidden-early" "$FX_TMP/cost-2m.json" "" "" "/h\\)" "absent"
+
+# Test 90: separator rules follow COLUMNS (minus a 4-column margin), else 100.
+rule_len() {
+  env -i HOME=/tmp PATH="$PATH" $1 bash "$RUNNER" "$FIXTURES/minimal.json" "" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=s.replace(/\x1b\[[0-9;]*m/g,"").split("\n").map(l=>(l.match(/^─+$/)||[""])[0].length);console.log(Math.max(...m))})'
+}
+for spec in "COLUMNS=60:56" "COLUMNS=181:177" ":100" "COLUMNS=abc:100" "COLUMNS=10:100"; do
+  envkv="${spec%%:*}"; want="${spec##*:}"; got="$(rule_len "$envkv")"
+  if [ "$got" = "$want" ]; then PASS=$((PASS+1)); echo "  PASS: 90-rule-width ${envkv:-unset}"
+  else FAIL=$((FAIL+1)); FAILED_TESTS+=("90-rule-width ${envkv:-unset} (want $want, got $got)"); echo "  FAIL: 90-rule-width ${envkv:-unset}"; fi
+done
 rm -rf "$FX_TMP"
 
 echo ""

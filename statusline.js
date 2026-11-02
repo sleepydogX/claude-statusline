@@ -357,7 +357,14 @@ process.stdin.on('end', () => {
       const totalCost = data.cost?.total_cost_usd;
       if (totalCost != null && totalCost > 0) {
         const costStr = totalCost < 0.01 ? '<$0.01' : `$${totalCost.toFixed(2)}`;
-        costPart = `\x1b[1;33m\u{1F4B0} ${costStr}\x1b[0m`;
+        // Under five minutes the hourly rate swings too much to mean anything.
+        const hours = Number(data.cost?.total_duration_ms) / 3600000;
+        let rateStr = '';
+        if (hours >= 5 / 60) {
+          const perHour = totalCost / hours;
+          rateStr = ` \x1b[2m($${perHour >= 1 ? perHour.toFixed(1) : perHour.toFixed(2)}/h)\x1b[0m`;
+        }
+        costPart = `\x1b[1;33m\u{1F4B0} ${costStr}\x1b[0m${rateStr}`;
       }
     }
 
@@ -376,9 +383,13 @@ process.stdin.on('end', () => {
         };
         // The payload's percentage is only as fresh as the last API response,
         // so once resets_at has passed it describes a window that is gone.
-        const windowState = (limit) => {
-          let pct = Math.round(Number(limit.used_percentage) || 0);
+        const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const windowState = (limit, windowMs) => {
+          const rawPct = Number(limit.used_percentage) || 0;
+          let pct = Math.round(rawPct);
           let resetStr = '';
+          let paceStr = '';
+          let etaStr = '';
           const resetsAt = Number(limit.resets_at);
           if (resetsAt > 0) {
             const diffMs = resetsAt * 1000 - Date.now();
@@ -392,12 +403,37 @@ process.stdin.on('end', () => {
                 ? `${d}d${String(h).padStart(2,'0')}h`
                 : `${h}h${String(m).padStart(2,'0')}m`;
               resetStr = ` \x1b[2m${text}\x1b[0m`;
+
+              // Pace: usage against the share of the window already elapsed.
+              // Early in a window one request moves the ratio wildly, so wait
+              // for 5% of it to pass before judging.
+              const elapsedMs = windowMs - diffMs;
+              const elapsedFrac = elapsedMs / windowMs;
+              if (elapsedFrac >= 0.05 && elapsedFrac <= 1) {
+                const delta = Math.round(rawPct - elapsedFrac * 100);
+                if (delta >= 1) {
+                  const c = delta >= 15 ? '\x1b[31m' : '\x1b[33m';
+                  paceStr = ` ${c}\u21E1${delta}%\x1b[0m`;
+                } else if (delta <= -1) {
+                  paceStr = ` \x1b[2;32m\u21E3${-delta}%\x1b[0m`;
+                }
+                // ETA: only when the current rate runs out before the reset.
+                if (rawPct > 0 && rawPct < 100) {
+                  const msToFull = (100 - rawPct) / (rawPct / elapsedMs);
+                  if (msToFull < diffMs) {
+                    const at = new Date(Date.now() + msToFull);
+                    const hhmm = `${String(at.getHours()).padStart(2,'0')}:${String(at.getMinutes()).padStart(2,'0')}`;
+                    const label = msToFull > 20 * 3600000 ? `${WEEKDAYS[at.getDay()]} ${hhmm}` : hhmm;
+                    etaStr = ` \x1b[31m\u2192 limit ${label}\x1b[0m`;
+                  }
+                }
+              }
             }
           }
-          return `${colorPct(pct)}${resetStr}`;
+          return `${colorPct(pct)}${paceStr}${resetStr}${etaStr}`;
         };
-        if (fiveHour) parts.push(`\x1b[1;37m\u26A15h\x1b[0m ${windowState(fiveHour)}`);
-        if (sevenDay) parts.push(`\x1b[1;37m\u{1F4C5}7d\x1b[0m ${windowState(sevenDay)}`);
+        if (fiveHour) parts.push(`\x1b[1;37m\u26A15h\x1b[0m ${windowState(fiveHour, 5 * 3600000)}`);
+        if (sevenDay) parts.push(`\x1b[1;37m\u{1F4C5}7d\x1b[0m ${windowState(sevenDay, 7 * 86400000)}`);
         rateLimitPart = parts.join(' \x1b[2m\u2502\x1b[0m ');
       }
     }
@@ -669,7 +705,11 @@ process.stdin.on('end', () => {
     // ── Layout ──
     const dim = (s) => `\x1b[2m${s}\x1b[0m`;
     const sep = dim(' \u2502 ');
-    const hr = dim('\u2500'.repeat(100));
+    // Claude Code passes the terminal width as COLUMNS (stdout is a pipe, so
+    // there is no TTY to ask). A small margin keeps the rule from wrapping.
+    const cols = parseInt(process.env.COLUMNS, 10);
+    const ruleWidth = Number.isInteger(cols) && cols >= 24 ? Math.min(cols - 4, 300) : 100;
+    const hr = dim('\u2500'.repeat(ruleWidth));
 
     // Location
     let locationPart;
