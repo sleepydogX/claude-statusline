@@ -41,7 +41,7 @@ grep -q 'gsd-statusline.js' "$SETTINGS" || { echo "FAIL: hook path not in status
 node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).statusLine.refreshInterval === 10 ? 0 : 1)' "$SETTINGS" \
   || { echo "FAIL: fresh install did not set statusLine.refreshInterval"; exit 1; }
 
-for flag in effort output_style fast_mode pr subagents; do
+for flag in effort output_style fast_mode pr subagents prompt_cache; do
   grep -q "\"$flag\"" "$CONFIG" || { echo "FAIL: $flag missing from config"; exit 1; }
 done
 
