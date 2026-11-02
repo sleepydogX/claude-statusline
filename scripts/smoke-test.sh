@@ -396,6 +396,46 @@ run_test "69b-pr-number-negative-hides-badge" "$FIXTURES/pr-number-5.json" "" ""
 # break the normal case.
 run_test "70-pr-number-valid-still-renders" "$FIXTURES/pr-open-approved.json" "" "" "#412" "present"
 
+# ── Subagents row ──
+# Builds the on-disk layout Claude Code writes beside a transcript:
+# <session>.jsonl and <session>/subagents/agent-<id>.{meta.json,jsonl}.
+SUB_TMP="$(mktemp -d)"
+SUB_DIR="$SUB_TMP/sess/subagents"
+mkdir -p "$SUB_DIR"
+: > "$SUB_TMP/sess.jsonl"
+usage_line() { printf '{"type":"assistant","message":{"usage":{"input_tokens":%s,"cache_read_input_tokens":%s,"cache_creation_input_tokens":%s}}}\n' "$1" "$2" "$3"; }
+
+# running, 100k of a 200k window -> 50%; the earlier smaller usage must not win
+printf '{"name":"research","agentType":"fork","model":"inherit"}' > "$SUB_DIR/agent-aaa.meta.json"
+{ usage_line 2 1000 0; usage_line 2 99000 998; echo '{"type":"user","message":{"content":"x"}}'; } > "$SUB_DIR/agent-aaa.jsonl"
+# finished -> hidden
+printf '{"name":"doneagent","agentType":"general-purpose","model":"haiku","finished":true}' > "$SUB_DIR/agent-bbb.meta.json"
+usage_line 1 5000 0 > "$SUB_DIR/agent-bbb.jsonl"
+# unfinished but silent for an hour -> treated as gone
+printf '{"name":"staleagent","agentType":"general-purpose","model":"haiku"}' > "$SUB_DIR/agent-ccc.meta.json"
+usage_line 1 5000 0 > "$SUB_DIR/agent-ccc.jsonl"
+touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1 hour' +%Y%m%d%H%M.%S)" "$SUB_DIR/agent-ccc.jsonl" "$SUB_DIR/agent-ccc.meta.json"
+# running, name carries an escape sequence -> stripped
+printf '{"name":"evil\\u001b[31mRED","agentType":"general-purpose","model":"haiku"}' > "$SUB_DIR/agent-ddd.meta.json"
+usage_line 1 20000 0 > "$SUB_DIR/agent-ddd.jsonl"
+
+SUB_FIXTURE="$SUB_TMP/payload.json"
+printf '{"session_id":"sub-test","transcript_path":"%s","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"context_window_size":200000,"remaining_percentage":90}}' "$SUB_TMP/sess.jsonl" > "$SUB_FIXTURE"
+
+run_test "71-subagents-count-active-only" "$SUB_FIXTURE" "" "" "🤖 2 active" "present"
+run_test "72-subagents-pct-from-last-usage" "$SUB_FIXTURE" "" "" "research.*█████░░░░░ 50%" "present"
+run_test "73-subagents-finished-hidden" "$SUB_FIXTURE" "" "" "doneagent" "absent"
+run_test "74-subagents-stale-hidden" "$SUB_FIXTURE" "" "" "staleagent" "absent"
+run_test "75-subagents-name-escape-stripped" "$SUB_FIXTURE" "" "" $'\x1b\\[31mRED' "absent"
+run_test "75b-subagents-name-still-shown" "$SUB_FIXTURE" "" "" "evil\\[31mRED" "present"
+
+# no subagents dir -> no row, and nothing else breaks
+NOSUB_FIXTURE="$SUB_TMP/payload-nosub.json"
+printf '{"session_id":"sub-test2","transcript_path":"%s","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"}}' "$SUB_TMP/missing.jsonl" > "$NOSUB_FIXTURE"
+run_test "76-subagents-absent-dir-no-row" "$NOSUB_FIXTURE" "" "" "🤖" "absent"
+run_test "76b-subagents-absent-dir-still-renders" "$NOSUB_FIXTURE" "" "" "Claude Opus" "present"
+rm -rf "$SUB_TMP"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then

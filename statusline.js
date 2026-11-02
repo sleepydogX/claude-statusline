@@ -87,6 +87,7 @@ const MODULES = {
   output_style: true,    // Active output style (added in T3)
   fast_mode: true,       // Fast mode indicator (added in T5)
   pr: true,              // Open pull request for the current branch
+  subagents: true,       // Running subagents and their context usage
 };
 
 // Load user overrides from config file if present
@@ -370,6 +371,93 @@ process.stdin.on('end', () => {
       }
     }
 
+    // ── Subagents ──
+    // Not in the payload. Claude Code keeps each subagent's record beside the
+    // transcript, in <transcript minus .jsonl>/subagents/: agent-<id>.meta.json
+    // gains "finished": true when the agent ends, and agent-<id>.jsonl holds its
+    // messages with per-response token usage. This layout is undocumented, so
+    // every read here fails closed to an empty segment.
+    let subagentPart = '';
+    if (MODULES.subagents) {
+      try {
+        const tp = data.transcript_path;
+        if (typeof tp === 'string' && tp.endsWith('.jsonl')) {
+          const subDir = path.join(tp.slice(0, -'.jsonl'.length), 'subagents');
+          // A killed agent never gets "finished", so one whose log has been
+          // silent this long is treated as gone rather than shown forever.
+          const STALE_MS = 15 * 60 * 1000;
+          const TAIL_BYTES = 256 * 1024;
+          const payloadWindow = data.context_window?.context_window_size;
+
+          const lastContextTokens = (logPath) => {
+            const stat = fs.statSync(logPath);
+            const readSize = Math.min(stat.size, TAIL_BYTES);
+            const fd = fs.openSync(logPath, 'r');
+            const buf = Buffer.alloc(readSize);
+            fs.readSync(fd, buf, 0, readSize, stat.size - readSize);
+            fs.closeSync(fd);
+            const lines = buf.toString('utf8').split('\n');
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (!lines[i].includes('"usage"')) continue;
+              try {
+                const u = JSON.parse(lines[i]).message?.usage;
+                if (!u) continue;
+                const n = (Number(u.input_tokens) || 0)
+                  + (Number(u.cache_read_input_tokens) || 0)
+                  + (Number(u.cache_creation_input_tokens) || 0);
+                if (n > 0) return n;
+              } catch (e) { /* truncated first line of the tail; keep going */ }
+            }
+            return 0;
+          };
+
+          const active = [];
+          for (const f of fs.readdirSync(subDir)) {
+            if (!/^agent-[A-Za-z0-9_-]+\.meta\.json$/.test(f)) continue;
+            try {
+              const meta = JSON.parse(fs.readFileSync(path.join(subDir, f), 'utf8'));
+              if (!meta || meta.finished === true) continue;
+              const logPath = path.join(subDir, f.replace(/\.meta\.json$/, '.jsonl'));
+              let mtime = 0;
+              let tokens = 0;
+              try {
+                mtime = fs.statSync(logPath).mtimeMs;
+                tokens = lastContextTokens(logPath);
+              } catch (e) {
+                mtime = fs.statSync(path.join(subDir, f)).mtimeMs;
+              }
+              if (Date.now() - mtime > STALE_MS) continue;
+              // Past 200k only a 1M window fits; an inherited model shares the
+              // main session's window; anything else is assumed to be 200k.
+              let windowSize = 200000;
+              if (tokens > 200000) windowSize = 1000000;
+              else if (meta.model === 'inherit' && Number(payloadWindow) > 0) windowSize = Number(payloadWindow);
+              const rawName = [meta.name, meta.description, meta.agentType].find(v => typeof v === 'string' && v) || 'agent';
+              active.push({ name: stripControl(rawName), tokens, windowSize, mtime });
+            } catch (e) { /* skip this agent */ }
+          }
+
+          if (active.length > 0) {
+            active.sort((a, b) => a.mtime - b.mtime);
+            const MAX_SHOWN = 3;
+            const MAX_NAME = 22;
+            const cells = active.slice(0, MAX_SHOWN).map(a => {
+              const name = a.name.length > MAX_NAME ? a.name.slice(0, MAX_NAME - 1) + '…' : a.name;
+              if (!a.tokens) return `\x1b[1;37m${name}\x1b[0m \x1b[2m…\x1b[0m`;
+              const pct = Math.max(0, Math.min(100, Math.round(a.tokens / a.windowSize * 100)));
+              const filled = Math.floor(pct / 10);
+              const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+              const color = pct < 50 ? '\x1b[32m' : pct < 65 ? '\x1b[33m' : pct < 80 ? '\x1b[38;5;208m' : '\x1b[31m';
+              return `\x1b[1;37m${name}\x1b[0m ${color}${bar} ${pct}%\x1b[0m`;
+            });
+            if (active.length > MAX_SHOWN) cells.push(`\x1b[2m+${active.length - MAX_SHOWN} more\x1b[0m`);
+            const header = `\x1b[1;38;5;117m\u{1F916} ${active.length} active\x1b[0m`;
+            subagentPart = [header, ...cells].join(' \x1b[2m│\x1b[0m ');
+          }
+        }
+      } catch (e) { /* no subagents dir yet, or unreadable */ }
+    }
+
     // ── Row 3: git context (payload-sourced, uncached) ──
     // repo, worktree and branch cost nothing to obtain, so they are read fresh on
     // every invocation. Only gh/supabase go through the cache below.
@@ -619,6 +707,10 @@ process.stdin.on('end', () => {
     if (row2Cells.length > 0) {
       lines.push(hr);
       lines.push(' ' + row2Cells.join(sep));
+    }
+    if (subagentPart) {
+      lines.push(hr);
+      lines.push(' ' + subagentPart);
     }
     if (row3Cells.length > 0) {
       lines.push(hr);

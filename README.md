@@ -24,6 +24,7 @@ A rich, modular status bar for [Claude Code](https://claude.ai/claude-code) that
 | **Cost** | Projected API cost in USD |
 | **Duration** | Session elapsed time |
 | **Rate Limits** | 5-hour and 7-day usage with time until reset |
+| **Subagents** | Count of subagents currently working, with each one's context usage |
 | **GitHub** | Repository, branch, and active account |
 | **Supabase** | Linked project name |
 
@@ -40,6 +41,29 @@ All three can be disabled individually in `~/.claude/statusline-config.json`.
 The 🏷 session name comes from the payload's `session_name` — a `/rename` or `--name` value, otherwise the AI-generated title — and falls back to the transcript slug when neither exists.
 
 > **Removed in the payload-field cleanup:** the `permission_mode` and `mcp_health` segments read `permissionMode` and `mcp_servers`, which Claude Code does not send to status line commands, so they never rendered. Claude Code already shows the permission mode in its own footer and surfaces MCP errors beside the status line. Upgrading drops both toggles from your config automatically.
+
+### Subagents row
+
+```
+🤖 2 active │ research ███████░░░ 48% │ verify-docs ██░░░░░░░░ 15%
+```
+
+Shown only while at least one subagent is generating; up to three are listed,
+then `+N more`. The payload carries no subagent data, so the row reads what
+Claude Code writes beside the transcript, in `<session>/subagents/`:
+
+- `agent-<id>.meta.json` gains `"finished": true` when the agent stops
+  generating — including while it waits on its own background command, so such
+  an agent drops off the row until it resumes. One silent for 15 minutes is
+  treated as gone, since a killed agent never gets the flag.
+- `agent-<id>.jsonl` holds its responses; the last one's input + cache tokens
+  give the context size. The window is 200k, the main session's window for an
+  agent that inherits its model, or 1M once usage passes 200k.
+
+This layout is undocumented and may change between Claude Code releases; the
+row then disappears rather than breaking the status line. It refreshes when
+the status line does, so set `statusLine.refreshInterval` (seconds) in
+`settings.json` to keep it current while the session is idle.
 
 ### Row 3 — repository context
 

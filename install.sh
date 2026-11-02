@@ -97,6 +97,7 @@ if [ "$UPGRADE_MODE" = false ]; then
   mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "✍ ")
   mod_fast_mode=$(ask_module "fast_mode" "Fast mode indicator" "y" "⚡")
   mod_pr=$(ask_module "pr" "Open pull request badge" "y" "🔀")
+  mod_subagents=$(ask_module "subagents" "Running subagents + context usage" "y" "🤖")
 
   echo ""
   echo -e "${CYAN}${BOLD}  External integrations (require CLI tools):${RESET}"
@@ -164,7 +165,8 @@ if [ "$UPGRADE_MODE" = false ]; then
   "effort": $mod_effort,
   "output_style": $mod_output_style,
   "fast_mode": $mod_fast_mode,
-  "pr": $mod_pr
+  "pr": $mod_pr,
+  "subagents": $mod_subagents
 }
 EOF
 else
@@ -176,6 +178,7 @@ else
       session_name: true, cost: true, duration: true, rate_limits: true,
       lines_changed: true, context_bridge: true, github: true, supabase: true,
       effort: true, output_style: true, fast_mode: true, pr: true,
+      subagents: true,
     };
     let cur = {};
     try { cur = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) {}
