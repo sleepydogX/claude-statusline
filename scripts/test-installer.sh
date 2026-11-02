@@ -38,7 +38,10 @@ grep -q '"statusLine"' "$SETTINGS" || { echo "FAIL: statusLine block not in sett
 grep -q 'gsd-statusline.js' "$SETTINGS" || { echo "FAIL: hook path not in statusLine.command"; exit 1; }
 
 # New module flags must all be present in config
-for flag in effort output_style fast_mode pr; do
+node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).statusLine.refreshInterval === 10 ? 0 : 1)' "$SETTINGS" \
+  || { echo "FAIL: fresh install did not set statusLine.refreshInterval"; exit 1; }
+
+for flag in effort output_style fast_mode pr subagents; do
   grep -q "\"$flag\"" "$CONFIG" || { echo "FAIL: $flag missing from config"; exit 1; }
 done
 
@@ -84,6 +87,19 @@ grep -q '"mcp_health"' "$CONFIG" && { echo "FAIL: mcp_health survived upgrade"; 
 grep -q '"session_name": false' "$CONFIG" || { echo "FAIL: upgrade clobbered an existing user value"; exit 1; }
 grep -q '"fast_mode"' "$CONFIG" || { echo "FAIL: upgrade did not add missing flags"; exit 1; }
 
+# Upgrading an install from before refreshInterval adds it...
+refresh_of() { node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).statusLine.refreshInterval)' "$SETTINGS"; }
+node -e 'const f=process.argv[1],fs=require("fs"),c=JSON.parse(fs.readFileSync(f,"utf8"));delete c.statusLine.refreshInterval;fs.writeFileSync(f,JSON.stringify(c))' "$SETTINGS"
+HOME="$SANDBOX" bash "$REPO_DIR/install.sh" <<< "y
+" >/dev/null
+[ "$(refresh_of)" = "10" ] || { echo "FAIL: upgrade did not add refreshInterval"; exit 1; }
+# ...but keeps one the user chose.
+node -e 'const f=process.argv[1],fs=require("fs"),c=JSON.parse(fs.readFileSync(f,"utf8"));c.statusLine.refreshInterval=3;fs.writeFileSync(f,JSON.stringify(c))' "$SETTINGS"
+HOME="$SANDBOX" bash "$REPO_DIR/install.sh" <<< "y
+" >/dev/null
+[ "$(refresh_of)" = "3" ] || { echo "FAIL: upgrade overwrote the user's refreshInterval"; exit 1; }
+
+echo "PASS: upgrade adds a missing refreshInterval and keeps a user-set one"
 echo "PASS: slash command installed with correct repo path"
 echo "PASS: idempotent upgrade"
 echo "PASS: installer writes settings.json and all new module flags"

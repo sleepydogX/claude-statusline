@@ -87,16 +87,17 @@ if [ "$UPGRADE_MODE" = false ]; then
     fi
   }
 
-  mod_session_name=$(ask_module "session_name" "Session name (random slug identifier)" "y" "🏷 ")
+  mod_session_name=$(ask_module "session_name" "Session name (random slug identifier)" "y" "🔖 ")
   mod_cost=$(ask_module "cost" "Projected cost in USD" "y" "💰")
-  mod_duration=$(ask_module "duration" "Session duration timer" "y" "⏱ ")
+  mod_duration=$(ask_module "duration" "Session duration timer" "y" "⌛ ")
   mod_rate_limits=$(ask_module "rate_limits" "Rate limits (5h + 7d usage)" "y" "⚡")
   mod_lines_changed=$(ask_module "lines_changed" "Lines added/removed" "y" "📊")
   mod_context_bridge=$(ask_module "context_bridge" "Context metrics bridge (for other hooks)" "y" "🔗")
   mod_effort=$(ask_module "effort" "Reasoning effort (/effort level)" "y" "🧠")
-  mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "✍ ")
+  mod_output_style=$(ask_module "output_style" "Output style (/output-style)" "y" "📝 ")
   mod_fast_mode=$(ask_module "fast_mode" "Fast mode indicator" "y" "⚡")
   mod_pr=$(ask_module "pr" "Open pull request badge" "y" "🔀")
+  mod_subagents=$(ask_module "subagents" "Running subagents + context usage" "y" "🤖")
 
   echo ""
   echo -e "${CYAN}${BOLD}  External integrations (require CLI tools):${RESET}"
@@ -164,7 +165,8 @@ if [ "$UPGRADE_MODE" = false ]; then
   "effort": $mod_effort,
   "output_style": $mod_output_style,
   "fast_mode": $mod_fast_mode,
-  "pr": $mod_pr
+  "pr": $mod_pr,
+  "subagents": $mod_subagents
 }
 EOF
 else
@@ -176,6 +178,7 @@ else
       session_name: true, cost: true, duration: true, rate_limits: true,
       lines_changed: true, context_bridge: true, github: true, supabase: true,
       effort: true, output_style: true, fast_mode: true, pr: true,
+      subagents: true,
     };
     let cur = {};
     try { cur = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) {}
@@ -213,13 +216,29 @@ if [ "$UPGRADE_MODE" = false ] && [ -n "$SETTINGS_TARGET" ]; then
       console.error("Existing settings.json is malformed; refusing to overwrite. Fix it or choose scope [3].");
       process.exit(1);
     }
-    cfg.statusLine = { type: "command", command: "node " + JSON.stringify(hookPath) };
+    // Without refreshInterval the line only redraws on new messages, so the
+    // cost, countdowns and subagents row freeze while the session is idle.
+    cfg.statusLine = { type: "command", command: "node " + JSON.stringify(hookPath), refreshInterval: 10 };
     fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n");
   ' "$SETTINGS_TARGET" "$HOOKS_DIR/gsd-statusline.js"
   echo -e "${GREEN}  statusLine wired into $SETTINGS_TARGET${RESET}"
 elif [ "$UPGRADE_MODE" = false ] && [ -z "$SETTINGS_TARGET" ]; then
   echo -e "${YELLOW}  Skipped settings.json wiring. Add this block manually:${RESET}"
-  echo '  "statusLine": { "type": "command", "command": "node \"'"$HOOKS_DIR"'/gsd-statusline.js\"" }'
+  echo '  "statusLine": { "type": "command", "command": "node \"'"$HOOKS_DIR"'/gsd-statusline.js\"", "refreshInterval": 10 }'
+elif [ "$UPGRADE_MODE" = true ]; then
+  # Installs from before refreshInterval existed: add it only when absent, so
+  # a value the user chose is kept. A malformed file is left untouched.
+  node -e '
+    const fs = require("fs");
+    const target = process.argv[1];
+    let cfg;
+    try { cfg = JSON.parse(fs.readFileSync(target, "utf8")); } catch (e) { process.exit(0); }
+    if (cfg.statusLine && typeof cfg.statusLine === "object" && cfg.statusLine.refreshInterval === undefined) {
+      cfg.statusLine.refreshInterval = 10;
+      fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n");
+      console.log("  statusLine.refreshInterval set to 10s");
+    }
+  ' "$USER_SETTINGS"
 fi
 
 echo ""

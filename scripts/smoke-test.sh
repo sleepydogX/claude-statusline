@@ -123,7 +123,7 @@ run_test "35-payload-fastmode-on" "$FIXTURES/payload-fastmode-on.json" "" "" $'\
 run_test "36-payload-fastmode-off-beats-settings" "$FIXTURES/payload-fastmode-off.json" "$FIXTURES/settings-fastmode.json" "" "FAST" "absent"
 
 # Test 37: native session_name renders without title-casing it
-run_test "37-payload-session-name" "$FIXTURES/payload-session-name.json" "" "" "🏷 refactor payload sources" "present"
+run_test "37-payload-session-name" "$FIXTURES/payload-session-name.json" "" "" "🔖 refactor payload sources" "present"
 
 # Test 38: an overlong session_name is truncated with an ellipsis
 run_test "38-session-name-truncated" "$FIXTURES/payload-session-name-long.json" "" "" "…" "present"
@@ -395,6 +395,163 @@ run_test "69b-pr-number-negative-hides-badge" "$FIXTURES/pr-number-5.json" "" ""
 # Test 70: a valid positive integer still renders, so the tighter guard did not
 # break the normal case.
 run_test "70-pr-number-valid-still-renders" "$FIXTURES/pr-open-approved.json" "" "" "#412" "present"
+
+# ── Subagents row ──
+# Builds the on-disk layout Claude Code writes beside a transcript:
+# <session>.jsonl and <session>/subagents/agent-<id>.{meta.json,jsonl}.
+SUB_TMP="$(mktemp -d)"
+SUB_DIR="$SUB_TMP/sess/subagents"
+mkdir -p "$SUB_DIR"
+: > "$SUB_TMP/sess.jsonl"
+usage_line() { printf '{"type":"assistant","message":{"usage":{"input_tokens":%s,"cache_read_input_tokens":%s,"cache_creation_input_tokens":%s}}}\n' "$1" "$2" "$3"; }
+
+# running, 100k of a 200k window -> 50%; the earlier smaller usage must not win
+printf '{"name":"research","agentType":"fork","model":"inherit"}' > "$SUB_DIR/agent-aaa.meta.json"
+{ usage_line 2 1000 0; usage_line 2 99000 998; echo '{"type":"user","message":{"content":"x"}}'; } > "$SUB_DIR/agent-aaa.jsonl"
+# finished -> hidden
+printf '{"name":"doneagent","agentType":"general-purpose","model":"haiku","finished":true}' > "$SUB_DIR/agent-bbb.meta.json"
+usage_line 1 5000 0 > "$SUB_DIR/agent-bbb.jsonl"
+# unfinished but silent for an hour -> treated as gone
+printf '{"name":"staleagent","agentType":"general-purpose","model":"haiku"}' > "$SUB_DIR/agent-ccc.meta.json"
+usage_line 1 5000 0 > "$SUB_DIR/agent-ccc.jsonl"
+touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1 hour' +%Y%m%d%H%M.%S)" "$SUB_DIR/agent-ccc.jsonl" "$SUB_DIR/agent-ccc.meta.json"
+# running, name carries an escape sequence -> stripped
+printf '{"name":"evil\\u001b[31mRED","agentType":"general-purpose","model":"haiku"}' > "$SUB_DIR/agent-ddd.meta.json"
+usage_line 1 20000 0 > "$SUB_DIR/agent-ddd.jsonl"
+# running, name carries a C1 CSI (U+009B) and a bidi override (U+202E) -> stripped
+printf '{"name":"c1\\u009b32mGREEN\\u202eflip","agentType":"general-purpose","model":"haiku"}' > "$SUB_DIR/agent-eee.meta.json"
+usage_line 1 20000 0 > "$SUB_DIR/agent-eee.jsonl"
+
+SUB_FIXTURE="$SUB_TMP/payload.json"
+printf '{"session_id":"sub-test","transcript_path":"%s","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"context_window_size":200000,"remaining_percentage":90}}' "$SUB_TMP/sess.jsonl" > "$SUB_FIXTURE"
+
+run_test "71-subagents-count-active-only" "$SUB_FIXTURE" "" "" "🤖 3 active" "present"
+run_test "72-subagents-pct-from-last-usage" "$SUB_FIXTURE" "" "" "research.*█████░░░░░ 50%" "present"
+run_test "73-subagents-finished-hidden" "$SUB_FIXTURE" "" "" "doneagent" "absent"
+run_test "74-subagents-stale-hidden" "$SUB_FIXTURE" "" "" "staleagent" "absent"
+run_test "75-subagents-name-escape-stripped" "$SUB_FIXTURE" "" "" $'\x1b\\[31mRED' "absent"
+run_test "75b-subagents-name-still-shown" "$SUB_FIXTURE" "" "" "evil\\[31mRED" "present"
+run_test "75c-subagents-c1-and-bidi-stripped" "$SUB_FIXTURE" "" "" $'\xc2\x9b|\xe2\x80\xae' "absent"
+run_test "75d-subagents-c1-name-still-shown" "$SUB_FIXTURE" "" "" "c132mGREENflip" "present"
+
+# no subagents dir -> no row, and nothing else breaks
+NOSUB_FIXTURE="$SUB_TMP/payload-nosub.json"
+printf '{"session_id":"sub-test2","transcript_path":"%s","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"}}' "$SUB_TMP/missing.jsonl" > "$NOSUB_FIXTURE"
+run_test "76-subagents-absent-dir-no-row" "$NOSUB_FIXTURE" "" "" "🤖" "absent"
+run_test "76b-subagents-absent-dir-still-renders" "$NOSUB_FIXTURE" "" "" "Claude Opus" "present"
+rm -rf "$SUB_TMP"
+
+# ── Context %, rate-limit freshness, cache sweep ──
+FX_TMP="$(mktemp -d)"
+NOW=$(date +%s)
+ctx_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"context_window":{"context_window_size":%s,"remaining_percentage":50}}' "$1" > "$2"; }
+ctx_fixture 1000000 "$FX_TMP/ctx-1m.json"
+ctx_fixture 200000 "$FX_TMP/ctx-200k.json"
+
+# Test 77: on a 1M window the 33k buffer is 3.3%, so 50% remaining is 52% used
+# (the old fixed 16.5% buffer reported 60%).
+run_test "77-ctx-1m-buffer-in-tokens" "$FX_TMP/ctx-1m.json" "" "" "CTX 52%" "present"
+# Test 78: a 200k window keeps the previous behaviour.
+run_test "78-ctx-200k-unchanged" "$FX_TMP/ctx-200k.json" "" "" "CTX 60%" "present"
+
+rl_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%s},"seven_day":{"used_percentage":%s,"resets_at":%s}}}' "$1" "$2" "$3" "$4" > "$5"; }
+rl_fixture 90 $((NOW - 60)) 30 $((NOW + 3*86400 + 4*3600 + 120)) "$FX_TMP/rl.json"
+# Test 79: a 5h window whose reset already passed shows 0%, not the stale 90%.
+run_test "79-5h-past-reset-shows-zero" "$FX_TMP/rl.json" "" "" "5h.*0%" "present"
+run_test "79b-5h-past-reset-hides-stale" "$FX_TMP/rl.json" "" "" "90%" "absent"
+# Test 80: the 7-day window now shows its countdown, in days once past 24h.
+run_test "80-7d-shows-reset-in-days" "$FX_TMP/rl.json" "" "" "7d.*30%.*3d04h" "present"
+
+# Test 81: the sweep deletes our week-old per-session files only.
+GC_TMP="$FX_TMP/gc"; mkdir -p "$GC_TMP"
+OLD_STAMP="$(date -v-8d +%Y%m%d%H%M.%S 2>/dev/null || date -d '-8 days' +%Y%m%d%H%M.%S)"
+for f in claude-info-old.json claude-ctx-old.json claude-slug-old unrelated-old.json; do : > "$GC_TMP/$f"; touch -t "$OLD_STAMP" "$GC_TMP/$f"; done
+: > "$GC_TMP/claude-info-fresh.json"
+env -i HOME=/tmp PATH="$PATH" TMPDIR="$GC_TMP" bash "$RUNNER" "$FIXTURES/minimal.json" "" >/dev/null 2>&1 || true
+gc_check() {
+  local ok=false
+  if [ "$2" = "gone" ]; then [ ! -e "$GC_TMP/$1" ] && ok=true; else [ -e "$GC_TMP/$1" ] && ok=true; fi
+  if $ok; then
+    PASS=$((PASS+1)); echo "  PASS: 81-gc-$1-$2"
+  else
+    FAIL=$((FAIL+1)); FAILED_TESTS+=("81-gc-$1-$2"); echo "  FAIL: 81-gc-$1-$2"
+  fi
+}
+gc_check claude-info-old.json gone
+gc_check claude-ctx-old.json gone
+gc_check claude-slug-old gone
+gc_check claude-info-fresh.json kept
+gc_check unrelated-old.json kept
+
+# Test 82: a symlink planted at the marker path is not followed, so its
+# target keeps its content, and the sweep is skipped.
+LINK_TMP="$FX_TMP/link"; mkdir -p "$LINK_TMP"
+printf 'precious' > "$FX_TMP/victim.txt"
+# Old mtime, so a marker check that follows the link would see the sweep as due.
+touch -t "$OLD_STAMP" "$FX_TMP/victim.txt"
+ln -s "$FX_TMP/victim.txt" "$LINK_TMP/claude-statusline-gc"
+: > "$LINK_TMP/claude-info-old.json"; touch -t "$OLD_STAMP" "$LINK_TMP/claude-info-old.json"
+env -i HOME=/tmp PATH="$PATH" TMPDIR="$LINK_TMP" bash "$RUNNER" "$FIXTURES/minimal.json" "" >/dev/null 2>&1 || true
+if [ "$(cat "$FX_TMP/victim.txt")" = "precious" ] && [ -e "$LINK_TMP/claude-info-old.json" ]; then
+  PASS=$((PASS+1)); echo "  PASS: 82-gc-marker-symlink-not-followed"
+else
+  FAIL=$((FAIL+1)); FAILED_TESTS+=("82-gc-marker-symlink-not-followed"); echo "  FAIL: 82-gc-marker-symlink-not-followed"
+fi
+
+# ── Pace, limit ETA, cost rate, rule width ──
+five_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%s}}}' "$1" "$2" > "$3"; }
+# half the 5h window gone (2.5h left)
+five_fixture 70 $((NOW + 9000)) "$FX_TMP/pace-ahead.json"
+five_fixture 20 $((NOW + 9000)) "$FX_TMP/pace-behind.json"
+# 4h55m left: only 1.7% of the window elapsed
+five_fixture 30 $((NOW + 17700)) "$FX_TMP/pace-early.json"
+
+# Test 83: 70% used at 50% elapsed is 20 points ahead, in red.
+run_test "83-pace-ahead" "$FX_TMP/pace-ahead.json" "" "" $'\x1b\\[31m⇡20%' "present"
+# Test 84: at that rate the window runs out (~1h04m) before the reset (2.5h).
+run_test "84-eta-shown-when-limit-before-reset" "$FX_TMP/pace-ahead.json" "" "" "→ limit [0-9]{2}:[0-9]{2}" "present"
+# Test 85: 20% at 50% elapsed is 30 points behind; no ETA since it lasts.
+run_test "85-pace-behind" "$FX_TMP/pace-behind.json" "" "" "⇣30%" "present"
+run_test "85b-no-eta-when-it-lasts" "$FX_TMP/pace-behind.json" "" "" "→ limit" "absent"
+# Test 86: too early in the window to judge pace.
+run_test "86-no-pace-early-in-window" "$FX_TMP/pace-early.json" "" "" "⇡|⇣" "absent"
+
+# Test 87: 7d at 80% with half the week gone runs out in ~21h: weekday shown.
+printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"rate_limits":{"seven_day":{"used_percentage":80,"resets_at":%s}}}' $((NOW + 302400)) > "$FX_TMP/eta-7d.json"
+run_test "87-eta-7d-has-weekday" "$FX_TMP/eta-7d.json" "" "" "→ limit (Sun|Mon|Tue|Wed|Thu|Fri|Sat) [0-9]{2}:[0-9]{2}" "present"
+
+cost_fixture() { printf '{"session_id":"fx","model":{"display_name":"Claude Opus"},"workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":%s,"total_duration_ms":%s}}' "$1" "$2" > "$3"; }
+cost_fixture 2.0 1800000 "$FX_TMP/cost-30m.json"
+cost_fixture 0.5 120000 "$FX_TMP/cost-2m.json"
+# Test 88: $2 over 30 minutes is $4.0/h.
+run_test "88-cost-per-hour" "$FX_TMP/cost-30m.json" "" "" "\\\$2\\.00.*\\(\\\$4\\.0/h\\)" "present"
+# Test 89: under five minutes the rate is hidden.
+run_test "89-cost-rate-hidden-early" "$FX_TMP/cost-2m.json" "" "" "/h\\)" "absent"
+
+# Test 90: separator rules follow COLUMNS (minus a 4-column margin), else 100.
+rule_len() {
+  env -i HOME=/tmp PATH="$PATH" $1 bash "$RUNNER" "$FIXTURES/minimal.json" "" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=s.replace(/\x1b\[[0-9;]*m/g,"").split("\n").map(l=>(l.match(/^─+$/)||[""])[0].length);console.log(Math.max(...m))})'
+}
+for spec in "COLUMNS=60:56" "COLUMNS=181:177" ":100" "COLUMNS=abc:100" "COLUMNS=10:100"; do
+  envkv="${spec%%:*}"; want="${spec##*:}"; got="$(rule_len "$envkv")"
+  if [ "$got" = "$want" ]; then PASS=$((PASS+1)); echo "  PASS: 90-rule-width ${envkv:-unset}"
+  else FAIL=$((FAIL+1)); FAILED_TESTS+=("90-rule-width ${envkv:-unset} (want $want, got $got)"); echo "  FAIL: 90-rule-width ${envkv:-unset}"; fi
+done
+rm -rf "$FX_TMP"
+
+# Test 91: every pictograph the script prints must default to emoji
+# presentation. Text-default ones (🏷 ⏱ ✍) get one width from Claude Code and
+# another from tmux, so partial redraws drop characters after them.
+AMBIG="$(node -e '
+const src = require("fs").readFileSync(process.argv[1], "utf8")
+  .replace(/\\u\{([0-9A-Fa-f]+)\}|\\u([0-9A-Fa-f]{4})/g, (_, a, b) => String.fromCodePoint(parseInt(a || b, 16)));
+const bad = new Set();
+for (const ch of src) if (/\p{Extended_Pictographic}/u.test(ch) && !/\p{Emoji_Presentation}/u.test(ch)) bad.add(ch);
+process.stdout.write([...bad].join(" "));
+' "$REPO_DIR/statusline.js")"
+if [ -z "$AMBIG" ]; then PASS=$((PASS+1)); echo "  PASS: 91-no-ambiguous-width-emoji"
+else FAIL=$((FAIL+1)); FAILED_TESTS+=("91-no-ambiguous-width-emoji (found: $AMBIG)"); echo "  FAIL: 91-no-ambiguous-width-emoji"; fi
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

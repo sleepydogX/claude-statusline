@@ -11,8 +11,11 @@ const os = require('os');
 // Used for every row-3 field sourced from the payload, a cache file, or a
 // subprocess's output (gh/supabase/git) — none of which are trusted to be
 // free of escape sequences.
+// C1 is included because some terminals treat \x9b as a one-byte CSI; bidi and
+// format characters are included because they can visually reorder the row.
+const CONTROL_RE = /[\x00-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]/g;
 function stripControl(s) {
-  return String(s).replace(/[\x00-\x1f\x7f]/g, '');
+  return String(s).replace(CONTROL_RE, '');
 }
 
 // Wrap text in an OSC 8 hyperlink. Only http(s) URLs free of control characters
@@ -21,9 +24,9 @@ function stripControl(s) {
 // the visible text can inject escape sequences into the row.
 // Terminals without OSC 8 support ignore the sequence and show the text.
 function osc8(url, text) {
-  const safeText = String(text).replace(/[\x00-\x1f\x7f]/g, '');
+  const safeText = stripControl(text);
   if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return safeText;
-  if (/[\x00-\x1f\x7f]/.test(url)) return safeText;
+  if (stripControl(url) !== url) return safeText;
   return `\x1b]8;;${url}\x07${safeText}\x1b]8;;\x07`;
 }
 
@@ -63,7 +66,7 @@ function readBranch(startDir) {
     const ref = head.match(/^ref:\s*refs\/heads\/(.+)$/);
     if (ref) {
       const name = ref[1].trim();
-      const safe = name.replace(/[\x00-\x1f\x7f]/g, '');
+      const safe = stripControl(name);
       return safe === name ? safe : '';
     }
     if (/^[0-9a-f]{7,40}$/i.test(head)) return head.slice(0, 7);
@@ -87,6 +90,7 @@ const MODULES = {
   output_style: true,    // Active output style (added in T3)
   fast_mode: true,       // Fast mode indicator (added in T5)
   pr: true,              // Open pull request for the current branch
+  subagents: true,       // Running subagents and their context usage
 };
 
 // Load user overrides from config file if present
@@ -112,13 +116,22 @@ process.stdin.on('end', () => {
     const session = data.session_id || '';
     const remaining = data.context_window?.remaining_percentage;
 
-    // ── Context window constants ──
-    const AUTO_COMPACT_BUFFER_PCT = 16.5;
+    // ── Context window ──
+    // Autocompact reserves a fixed token buffer, not a fixed share of the
+    // window: 33k is 16.5% of 200k but only 3.3% of 1M.
+    const AUTO_COMPACT_BUFFER_TOKENS = 33000;
+    const windowSize = Number(data.context_window?.context_window_size) > 0
+      ? Number(data.context_window.context_window_size)
+      : 200000;
+    const AUTO_COMPACT_BUFFER_PCT = Math.min(50, AUTO_COMPACT_BUFFER_TOKENS / windowSize * 100);
+    const usedPct = remaining == null ? null : (() => {
+      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
+      return Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
+    })();
 
     // Write context metrics bridge file (for context-monitor hooks)
     if (MODULES.context_bridge && remaining != null) {
-      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
-      const used = Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
+      const used = usedPct;
       const sessionSafe = session && !/[/\\]|\.\./.test(session);
       if (sessionSafe) {
         try {
@@ -220,7 +233,7 @@ process.stdin.on('end', () => {
           name = raw.name;
         }
         if (name && name !== 'default') {
-          outputStylePart = `\x1b[36m\u270D style: ${name}\x1b[0m`;
+          outputStylePart = `\x1b[36m\u{1F4DD} style: ${name}\x1b[0m`;
         }
       } catch (e) { /* silent */ }
     }
@@ -240,26 +253,38 @@ process.stdin.on('end', () => {
       } catch (e) { /* silent */ }
     }
 
-    // ── Current task from todos ──
-    let task = '';
-    const homeDir = os.homedir();
-    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
-    const todosDir = path.join(claudeDir, 'todos');
-    if (session && fs.existsSync(todosDir)) {
-      try {
-        const files = fs.readdirSync(todosDir)
-          .filter(f => f.startsWith(session) && f.includes('-agent-') && f.endsWith('.json'))
-          .map(f => ({ name: f, mtime: fs.statSync(path.join(todosDir, f)).mtime }))
-          .sort((a, b) => b.mtime - a.mtime);
-        if (files.length > 0) {
+    // ── Stale cache cleanup ──
+    // Per-session files below accumulate in tmpdir forever. Sweep those older
+    // than a week, at most once a day, gated by a marker file's mtime.
+    try {
+      const tmp = os.tmpdir();
+      const marker = path.join(tmp, 'claude-statusline-gc');
+      const DAY_MS = 86400000;
+      let lastRun = 0;
+      try { lastRun = fs.lstatSync(marker).mtimeMs; } catch (e) {}
+      if (Date.now() - lastRun > DAY_MS) {
+        // tmpdir may be a shared /tmp: O_NOFOLLOW refuses a planted symlink
+        // (throwing, which skips the sweep), and bumping mtime instead of
+        // writing means nothing is ever truncated.
+        const { O_WRONLY, O_CREAT, O_NOFOLLOW } = fs.constants;
+        const fd = fs.openSync(marker, O_WRONLY | O_CREAT | O_NOFOLLOW, 0o600);
+        try {
+          const now = new Date();
+          fs.futimesSync(fd, now, now);
+        } finally {
+          fs.closeSync(fd);
+        }
+        const cutoff = Date.now() - 7 * DAY_MS;
+        for (const f of fs.readdirSync(tmp)) {
+          if (!/^claude-(info-.+\.json|ctx-.+\.json|slug-.+)$/.test(f)) continue;
           try {
-            const todos = JSON.parse(fs.readFileSync(path.join(todosDir, files[0].name), 'utf8'));
-            const inProgress = todos.find(t => t.status === 'in_progress');
-            if (inProgress) task = inProgress.activeForm || '';
+            const p = path.join(tmp, f);
+            const st = fs.lstatSync(p);
+            if (st.isFile() && st.mtimeMs < cutoff) fs.unlinkSync(p);
           } catch (e) {}
         }
-      } catch (e) {}
-    }
+      }
+    } catch (e) { /* silent */ }
 
     // ── Session name ──
     // Prefer the native session_name field (a /rename or --name value, otherwise
@@ -273,7 +298,7 @@ process.stdin.on('end', () => {
       const shown = clean.length > MAX_SESSION_NAME
         ? clean.slice(0, MAX_SESSION_NAME - 1) + '…'
         : clean;
-      return `\x1b[1;38;5;213m\u{1F3F7} ${shown}\x1b[0m`;
+      return `\x1b[1;38;5;213m\u{1F516} ${shown}\x1b[0m`;
     };
     if (MODULES.session_name && typeof data.session_name === 'string') {
       sessionNamePart = renderSessionName(data.session_name);
@@ -322,7 +347,7 @@ process.stdin.on('end', () => {
         const m = Math.floor((elapsed % 3600) / 60);
         const s = elapsed % 60;
         const timeStr = h > 0 ? `${h}h${String(m).padStart(2,'0')}m` : `${m}m${String(s).padStart(2,'0')}s`;
-        durationPart = `\x1b[1;35m\u23F1 ${timeStr}\x1b[0m`;
+        durationPart = `\x1b[1;35m\u231B ${timeStr}\x1b[0m`;
       }
     }
 
@@ -332,7 +357,14 @@ process.stdin.on('end', () => {
       const totalCost = data.cost?.total_cost_usd;
       if (totalCost != null && totalCost > 0) {
         const costStr = totalCost < 0.01 ? '<$0.01' : `$${totalCost.toFixed(2)}`;
-        costPart = `\x1b[1;33m\u{1F4B0} ${costStr}\x1b[0m`;
+        // Under five minutes the hourly rate swings too much to mean anything.
+        const hours = Number(data.cost?.total_duration_ms) / 3600000;
+        let rateStr = '';
+        if (hours >= 5 / 60) {
+          const perHour = totalCost / hours;
+          rateStr = ` \x1b[2m($${perHour >= 1 ? perHour.toFixed(1) : perHour.toFixed(2)}/h)\x1b[0m`;
+        }
+        costPart = `\x1b[1;33m\u{1F4B0} ${costStr}\x1b[0m${rateStr}`;
       }
     }
 
@@ -349,25 +381,148 @@ process.stdin.on('end', () => {
           if (pct < 90) return `\x1b[38;5;208m${pct}%\x1b[0m`;
           return `\x1b[5;31m${pct}%\x1b[0m`;
         };
-        if (fiveHour) {
-          const pct = fiveHour.used_percentage || 0;
+        // The payload's percentage is only as fresh as the last API response,
+        // so once resets_at has passed it describes a window that is gone.
+        const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const windowState = (limit, windowMs) => {
+          const rawPct = Number(limit.used_percentage) || 0;
+          let pct = Math.round(rawPct);
           let resetStr = '';
-          if (fiveHour.resets_at) {
-            const diffMs = fiveHour.resets_at * 1000 - Date.now();
-            if (diffMs > 0) {
-              const diffH = Math.floor(diffMs / 3600000);
-              const diffM = Math.floor((diffMs % 3600000) / 60000);
-              resetStr = ` \x1b[2m${diffH}h${String(diffM).padStart(2,'0')}m\x1b[0m`;
+          let paceStr = '';
+          let etaStr = '';
+          const resetsAt = Number(limit.resets_at);
+          if (resetsAt > 0) {
+            const diffMs = resetsAt * 1000 - Date.now();
+            if (diffMs <= 0) {
+              pct = 0;
+            } else {
+              const d = Math.floor(diffMs / 86400000);
+              const h = Math.floor((diffMs % 86400000) / 3600000);
+              const m = Math.floor((diffMs % 3600000) / 60000);
+              const text = d > 0
+                ? `${d}d${String(h).padStart(2,'0')}h`
+                : `${h}h${String(m).padStart(2,'0')}m`;
+              resetStr = ` \x1b[2m${text}\x1b[0m`;
+
+              // Pace: usage against the share of the window already elapsed.
+              // Early in a window one request moves the ratio wildly, so wait
+              // for 5% of it to pass before judging.
+              const elapsedMs = windowMs - diffMs;
+              const elapsedFrac = elapsedMs / windowMs;
+              if (elapsedFrac >= 0.05 && elapsedFrac <= 1) {
+                const delta = Math.round(rawPct - elapsedFrac * 100);
+                if (delta >= 1) {
+                  const c = delta >= 15 ? '\x1b[31m' : '\x1b[33m';
+                  paceStr = ` ${c}\u21E1${delta}%\x1b[0m`;
+                } else if (delta <= -1) {
+                  paceStr = ` \x1b[2;32m\u21E3${-delta}%\x1b[0m`;
+                }
+                // ETA: only when the current rate runs out before the reset.
+                if (rawPct > 0 && rawPct < 100) {
+                  const msToFull = (100 - rawPct) / (rawPct / elapsedMs);
+                  if (msToFull < diffMs) {
+                    const at = new Date(Date.now() + msToFull);
+                    const hhmm = `${String(at.getHours()).padStart(2,'0')}:${String(at.getMinutes()).padStart(2,'0')}`;
+                    const label = msToFull > 20 * 3600000 ? `${WEEKDAYS[at.getDay()]} ${hhmm}` : hhmm;
+                    etaStr = ` \x1b[31m\u2192 limit ${label}\x1b[0m`;
+                  }
+                }
+              }
             }
           }
-          parts.push(`\x1b[1;37m\u26A15h\x1b[0m ${colorPct(pct)}${resetStr}`);
-        }
-        if (sevenDay) {
-          const pct = sevenDay.used_percentage || 0;
-          parts.push(`\x1b[1;37m\u{1F4C5}7d\x1b[0m ${colorPct(pct)}`);
-        }
+          return `${colorPct(pct)}${paceStr}${resetStr}${etaStr}`;
+        };
+        if (fiveHour) parts.push(`\x1b[1;37m\u26A15h\x1b[0m ${windowState(fiveHour, 5 * 3600000)}`);
+        if (sevenDay) parts.push(`\x1b[1;37m\u{1F4C5}7d\x1b[0m ${windowState(sevenDay, 7 * 86400000)}`);
         rateLimitPart = parts.join(' \x1b[2m\u2502\x1b[0m ');
       }
+    }
+
+    // ── Subagents ──
+    // Not in the payload. Claude Code keeps each subagent's record beside the
+    // transcript, in <transcript minus .jsonl>/subagents/: agent-<id>.meta.json
+    // gains "finished": true when the agent ends, and agent-<id>.jsonl holds its
+    // messages with per-response token usage. This layout is undocumented, so
+    // every read here fails closed to an empty segment.
+    let subagentPart = '';
+    if (MODULES.subagents) {
+      try {
+        const tp = data.transcript_path;
+        if (typeof tp === 'string' && tp.endsWith('.jsonl')) {
+          const subDir = path.join(tp.slice(0, -'.jsonl'.length), 'subagents');
+          // A killed agent never gets "finished", so one whose log has been
+          // silent this long is treated as gone rather than shown forever.
+          const STALE_MS = 15 * 60 * 1000;
+          const TAIL_BYTES = 256 * 1024;
+          const payloadWindow = data.context_window?.context_window_size;
+
+          const lastContextTokens = (logPath) => {
+            const stat = fs.statSync(logPath);
+            const readSize = Math.min(stat.size, TAIL_BYTES);
+            const fd = fs.openSync(logPath, 'r');
+            const buf = Buffer.alloc(readSize);
+            fs.readSync(fd, buf, 0, readSize, stat.size - readSize);
+            fs.closeSync(fd);
+            const lines = buf.toString('utf8').split('\n');
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (!lines[i].includes('"usage"')) continue;
+              try {
+                const u = JSON.parse(lines[i]).message?.usage;
+                if (!u) continue;
+                const n = (Number(u.input_tokens) || 0)
+                  + (Number(u.cache_read_input_tokens) || 0)
+                  + (Number(u.cache_creation_input_tokens) || 0);
+                if (n > 0) return n;
+              } catch (e) { /* truncated first line of the tail; keep going */ }
+            }
+            return 0;
+          };
+
+          const active = [];
+          for (const f of fs.readdirSync(subDir)) {
+            if (!/^agent-[A-Za-z0-9_-]+\.meta\.json$/.test(f)) continue;
+            try {
+              const meta = JSON.parse(fs.readFileSync(path.join(subDir, f), 'utf8'));
+              if (!meta || meta.finished === true) continue;
+              const logPath = path.join(subDir, f.replace(/\.meta\.json$/, '.jsonl'));
+              let mtime = 0;
+              let tokens = 0;
+              try {
+                mtime = fs.statSync(logPath).mtimeMs;
+                tokens = lastContextTokens(logPath);
+              } catch (e) {
+                mtime = fs.statSync(path.join(subDir, f)).mtimeMs;
+              }
+              if (Date.now() - mtime > STALE_MS) continue;
+              // Past 200k only a 1M window fits; an inherited model shares the
+              // main session's window; anything else is assumed to be 200k.
+              let windowSize = 200000;
+              if (tokens > 200000) windowSize = 1000000;
+              else if (meta.model === 'inherit' && Number(payloadWindow) > 0) windowSize = Number(payloadWindow);
+              const rawName = [meta.name, meta.description, meta.agentType].find(v => typeof v === 'string' && v) || 'agent';
+              active.push({ name: stripControl(rawName), tokens, windowSize, mtime });
+            } catch (e) { /* skip this agent */ }
+          }
+
+          if (active.length > 0) {
+            active.sort((a, b) => a.mtime - b.mtime);
+            const MAX_SHOWN = 3;
+            const MAX_NAME = 22;
+            const cells = active.slice(0, MAX_SHOWN).map(a => {
+              const name = a.name.length > MAX_NAME ? a.name.slice(0, MAX_NAME - 1) + '…' : a.name;
+              if (!a.tokens) return `\x1b[1;37m${name}\x1b[0m \x1b[2m…\x1b[0m`;
+              const pct = Math.max(0, Math.min(100, Math.round(a.tokens / a.windowSize * 100)));
+              const filled = Math.floor(pct / 10);
+              const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+              const color = pct < 50 ? '\x1b[32m' : pct < 65 ? '\x1b[33m' : pct < 80 ? '\x1b[38;5;208m' : '\x1b[31m';
+              return `\x1b[1;37m${name}\x1b[0m ${color}${bar} ${pct}%\x1b[0m`;
+            });
+            if (active.length > MAX_SHOWN) cells.push(`\x1b[2m+${active.length - MAX_SHOWN} more\x1b[0m`);
+            const header = `\x1b[1;38;5;117m\u{1F916} ${active.length} active\x1b[0m`;
+            subagentPart = [header, ...cells].join(' \x1b[2m│\x1b[0m ');
+          }
+        }
+      } catch (e) { /* no subagents dir yet, or unreadable */ }
     }
 
     // ── Row 3: git context (payload-sourced, uncached) ──
@@ -529,8 +684,7 @@ process.stdin.on('end', () => {
     // Context bar with label
     let ctxPart = '';
     if (remaining != null) {
-      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
-      const used = Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
+      const used = usedPct;
       const filled = Math.floor(used / 10);
       const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(10 - filled);
       const label = `CTX ${used}%`;
@@ -551,7 +705,11 @@ process.stdin.on('end', () => {
     // ── Layout ──
     const dim = (s) => `\x1b[2m${s}\x1b[0m`;
     const sep = dim(' \u2502 ');
-    const hr = dim('\u2500'.repeat(100));
+    // Claude Code passes the terminal width as COLUMNS (stdout is a pipe, so
+    // there is no TTY to ask). A small margin keeps the rule from wrapping.
+    const cols = parseInt(process.env.COLUMNS, 10);
+    const ruleWidth = Number.isInteger(cols) && cols >= 24 ? Math.min(cols - 4, 300) : 100;
+    const hr = dim('\u2500'.repeat(ruleWidth));
 
     // Location
     let locationPart;
@@ -605,20 +763,17 @@ process.stdin.on('end', () => {
     // ROW 3: GitHub + Supabase
     const row3Cells = [githubPart, prPart, supabasePart].filter(Boolean);
 
-    // Task row
-    const taskRow = task ? `\x1b[1;38;5;220m\u2699 ${task}\x1b[0m` : '';
-
     // Compose
     const lines = [];
     lines.push(hr);
     lines.push(' ' + row1Cells.join(sep));
-    if (taskRow) {
-      lines.push(hr);
-      lines.push(' ' + taskRow);
-    }
     if (row2Cells.length > 0) {
       lines.push(hr);
       lines.push(' ' + row2Cells.join(sep));
+    }
+    if (subagentPart) {
+      lines.push(hr);
+      lines.push(' ' + subagentPart);
     }
     if (row3Cells.length > 0) {
       lines.push(hr);
